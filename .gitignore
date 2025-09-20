@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.sqlite3
+*.log
+
+# Django
+*.pot
+*.pyc
+*.pyo
+*.mo
+*.log
+*.pot
+*.pyc
+*.py[cod]
+db.sqlite3
+media/
+staticfiles/
+local_settings.py
+
+# Virtual Envs
+.venv/
+env/
+venv/
+ENV/
+
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
+.pnpm-debug.log
+
+# React / Vite / Next.js
+dist/
+build/
+.cache/
+.next/
+out/
+coverage/
+
+# Environment & Config
+.env
+.env.local
+.env.*
+*.pem
+
+# VSCode
+.vscode/
+.history/
+
+# System Files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,65 @@
+# ========================================================
+# Django Auth Template Requirements
+# Full-featured authentication stack:
+# JWT, Social Login, Email Verify, Magic Links, TOTP, WebAuthn,
+# Org Policies, Rate Limiting, Device Tracking, etc.
+# ========================================================
+
+# --- Core Framework ---
+Django==5.0.6                  # Django 5.x, core framework
+
+# --- API & JWT ---
+djangorestframework==3.15.2     # DRF: API serialization & views
+djangorestframework-simplejwt[blacklist]==5.3.1  
+# JWT access/refresh tokens with rotation & blacklist
+# [blacklist] extra is required for refresh token revocation
+
+# --- Social / User Auth ---
+django-allauth==0.63.6          # Social login & account mgmt (Google, etc.)
+dj-rest-auth==6.0.0             # REST API endpoints wrapping django-allauth
+
+# --- MFA / OTP ---
+django-otp==1.3.0               # Core OTP framework (TOTP, SMS, email, etc.)
+django-two-factor-auth==1.15.5  # Full 2FA flows built on django-otp
+pyotp==2.9.0                    # Generates & validates TOTP secrets
+qrcode==7.4.2                   # Generate QR codes for TOTP provisioning
+
+# --- Password Security ---
+argon2-cffi==23.1.0             # Argon2 password hasher (stronger than PBKDF2)
+
+# --- Abuse Protection ---
+django-axes==6.5.1              # Brute force protection & lockouts
+django-ratelimit==4.1.0         # Per-view throttling (login, OTP, etc.)
+
+# --- CORS & Env Mgmt ---
+django-cors-headers==4.4.0      # Cross-Origin Resource Sharing middleware
+django-environ==0.11.2          # Manage secrets/config via .env
+
+# --- Email / SMS ---
+django-anymail==13.1            # Unified email API (SendGrid, Mailgun, SES…)
+phonenumberslite==8.13.40       # Parse & validate phone numbers (for SMS/OTP)
+
+# --- WebAuthn (Passkeys) ---
+webauthn==2.1.0                 # FIDO2 / WebAuthn passkey registration & auth
+
+# --- Device / IP Tracking ---
+django-ipware==7.0.1             # Extract real client IP address
+geoip2==4.8.0                   # Optional GeoIP lookup for login activity
+
+# --- Images ---
+Pillow==10.3.0                  # Image handling (QR codes, email attachments)
+
+# --- Optional Enterprise (commented by default) ---
+# djangosaml2==1.8.0            # Add for enterprise SAML 2.0 support
+
+# --- Security ---
+cryptography>=41.0.0
+
+# --- Channels (for WebSocket support, if needed) ---
+channels==4.1.0
+
+# --- Caching with Redis (recommended for production) ---
+django-redis==5.4.0
+
+# --- API Schema / Docs ---
+drf-spectacular==0.27.2
