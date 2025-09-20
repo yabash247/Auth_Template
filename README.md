@@ -69,3 +69,31 @@ JWT_SIGNING_KEY=dev-secret-change-me
 - Start React frontend: npm run dev
 - Visit http://localhost:5173/ → try register/login flows
 - Admin at http://localhost:8000/admin/
+
+
+
+## GIT 
+- Step 5: Initialize Git in Your Project
+    🔹 git init
+    🔹 git add .
+    🔹 git commit -m "Initial commit"
+
+- Step 6: Link Local Project to GitHub
+    🔹 git remote add origin https://github.com/username/my-project.git
+    🔹 git branch -M main
+    🔹 git push -u origin main
+
+- Step 7: Using Git & VSCode Together
+    🔹 git add .
+    🔹 git commit -m "Updated feature"
+    🔹 git push
+
+- Step 8: To pull changes from GitHub:
+    🔹 git pull
+    🔹 If There’s a Conflict
+        👉 git add <file>
+        👉 git rebase --continue
+
+
+
+
