@@ -1,5 +1,6 @@
 import { useState } from "react";
 import LoginPage from "./LoginPage";
+import ResendVerification from "./components/ResendVerification";
 
 function App() {
   const [user, setUser] = useState(null);
@@ -13,7 +14,11 @@ function App() {
     <div style={{ padding: 20, fontFamily: "Arial" }}>
       <h1>Django Auth Template Demo</h1>
       {!user ? (
-        <LoginPage onLogin={setUser} />
+        <>
+          <LoginPage onLogin={setUser} />
+          <hr />
+          <ResendVerification />   {/* 👈 added here */}
+        </>
       ) : (
         <div>
           <h2>Welcome, {user.email}</h2>

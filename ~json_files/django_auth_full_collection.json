@@ -1,0 +1,861 @@
+{
+  "info": {
+    "name": "Django Auth API Collection",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_postman_id": "auth-template-collection"
+  },
+  "item": [
+    {
+      "name": "User Registration & Profile",
+      "item": [
+        {
+          "name": "Register User",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"StrongPass123!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/accounts/register/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "register"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Profile",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/accounts/me/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "me"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identifier\": \"user@example.com\",\n  \"password\": \"StrongPass123!\",\n  \"remember_me\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/accounts/login/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "login"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/accounts/logout/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "logout"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Password Management",
+      "item": [
+        {
+          "name": "Forgot Password",
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/accounts/password/forgot/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "password",
+                "forgot"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Reset Password",
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"uid\": \"MQ\",\n  \"token\": \"xyztokencode\",\n  \"new_password\": \"NewPass456!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/accounts/password/reset/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "password",
+                "reset"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Change Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"current_password\": \"OldPass123!\",\n  \"new_password\": \"NewPass456!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/accounts/password/change/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "password",
+                "change"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Magic Link Login",
+      "item": [
+        {
+          "name": "Request Magic Link",
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/accounts/magic/request/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "magic",
+                "request"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Consume Magic Link",
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"generated_token_value\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/accounts/magic/consume/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "magic",
+                "consume"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "MFA (TOTP & Backup Codes)",
+      "item": [
+        {
+          "name": "TOTP Setup Begin",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/accounts/mfa/totp/setup-begin/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "mfa",
+                "totp",
+                "setup-begin"
+              ]
+            }
+          }
+        },
+        {
+          "name": "TOTP Confirm",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/accounts/mfa/totp/confirm/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "mfa",
+                "totp",
+                "confirm"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Backup Codes Generate",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"count\": 5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/accounts/mfa/backup-codes/generate/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "mfa",
+                "backup-codes",
+                "generate"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Backup Code Verify",
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"abcd1234\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/accounts/mfa/backup-codes/verify/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "mfa",
+                "backup-codes",
+                "verify"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Email & SMS OTP",
+      "item": [
+        {
+          "name": "Request Email OTP",
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"digits\": 6\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/accounts/otp/email/request/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "otp",
+                "email",
+                "request"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Verify Email OTP",
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"code\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/accounts/otp/email/verify/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "otp",
+                "email",
+                "verify"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Request SMS OTP",
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"+1234567890\",\n  \"digits\": 6\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/accounts/otp/sms/request/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "otp",
+                "sms",
+                "request"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Verify SMS OTP",
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"+1234567890\",\n  \"code\": \"654321\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/accounts/otp/sms/verify/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "otp",
+                "sms",
+                "verify"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "WebAuthn / Passkeys",
+      "item": [
+        {
+          "name": "WebAuthn Register Begin",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/accounts/webauthn/register/begin/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "webauthn",
+                "register",
+                "begin"
+              ]
+            }
+          }
+        },
+        {
+          "name": "WebAuthn Register Complete",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"credential\": {\n    \"label\": \"My Key\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/accounts/webauthn/register/complete/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "webauthn",
+                "register",
+                "complete"
+              ]
+            }
+          }
+        },
+        {
+          "name": "WebAuthn Auth Begin",
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/accounts/webauthn/auth/begin/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "webauthn",
+                "auth",
+                "begin"
+              ]
+            }
+          }
+        },
+        {
+          "name": "WebAuthn Auth Complete",
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/accounts/webauthn/auth/complete/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "webauthn",
+                "auth",
+                "complete"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin Account Actions",
+      "item": [
+        {
+          "name": "Lock User",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/accounts/1/lock/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "1",
+                "lock"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Unlock User",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/accounts/1/unlock/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "1",
+                "unlock"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Disable User",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/accounts/1/disable/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "1",
+                "disable"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Enable User",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/accounts/1/enable/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "1",
+                "enable"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Soft Delete User",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/accounts/1/soft-delete/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "1",
+                "soft-delete"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Restore User",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/accounts/1/restore/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "1",
+                "restore"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Hard Delete User",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/accounts/1/hard-delete/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "1",
+                "hard-delete"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "User-Initiated Account Actions",
+      "item": [
+        {
+          "name": "Suspend Account",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/accounts/suspend/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "suspend"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Request Delete Account",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/accounts/request-delete/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "request-delete"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Cancel Delete Account",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/accounts/cancel-delete/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "cancel-delete"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Hard Delete Account",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/accounts/delete/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "delete"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Re-Authenticate",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"password\": \"StrongPass123!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/accounts/api/auth/reauth/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "api",
+                "auth",
+                "reauth"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

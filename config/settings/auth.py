@@ -14,7 +14,6 @@ AUTH_USER_MODEL = "accounts.User"
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
-        "rest_framework.authentication.SessionAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticated",
@@ -49,7 +48,8 @@ ACCOUNT_EMAIL_REQUIRED = True              # Require email
 ACCOUNT_USERNAME_REQUIRED = False          # Don't generate usernames
 ACCOUNT_UNIQUE_EMAIL = True                # Ensure unique emails
 
-ACCOUNT_ADAPTER = "accounts.adapter.CustomAccountAdapter"
+
+ACCOUNT_ADAPTER = "accounts.adapters.CustomAccountAdapter"
 ACCOUNT_EMAIL_VERIFICATION = "mandatory"
 
 # Redirects after login/logout
@@ -89,13 +89,21 @@ SOCIALACCOUNT_PROVIDERS = {
 }
 
 
+# Axes (brute force protection)
+AXES_ENABLED = True
+AXES_LOCK_OUT_AT_FAILURE = False   # 🚫 Disable Axes lockouts
+AXES_RESET_ON_SUCCESS = True
+AXES_COOLOFF_TIME = None           # don’t auto-unlock
+AXES_FAILURE_LIMIT = 999           # very high, so it never locks
+
 AUTHENTICATION_BACKENDS = (
-    # Axes must be first so it can intercept failed logins
+    # Keep Axes backend so it can log attempts
     "axes.backends.AxesStandaloneBackend",
 
-    # Default Django auth
+    # Default Django
     "django.contrib.auth.backends.ModelBackend",
 
-    # Allauth (for social logins)
+    # Allauth
     "allauth.account.auth_backends.AuthenticationBackend",
 )
+

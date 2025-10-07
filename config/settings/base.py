@@ -9,7 +9,6 @@ Split settings by concern to keep things maintainable:
 
 Override with environment-specific modules (dev.py, staging.py, prod.py).
 """
-
 from pathlib import Path
 import environ, os
 
@@ -21,20 +20,43 @@ env = environ.Env(
     AUTH_USE_JWT=(bool, True),
 )
 
-# Default env loader (dev fallback)
+# Load default env file if exists (for local dev)
 default_env_path = os.path.join(BASE_DIR, "env", ".env.dev")
 if os.path.exists(default_env_path):
     environ.Env.read_env(default_env_path)
 
-# Core settings
+# -----------------------------
+# Core Settings
+# -----------------------------
 DEBUG = env("DEBUG")
 SECRET_KEY = env("SECRET_KEY")
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["127.0.0.1", "localhost"])
 
-# Database (SQLite by default, overridden per env)
-DATABASES = {"default": env.db(default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}")}
+# Custom user model
+AUTH_USER_MODEL = "accounts.User"
 
-# Installed apps
+# Custom adapter for HTML verification emails
+ACCOUNT_ADAPTER = "accounts.adapters.CustomAccountAdapter"
+
+# -----------------------------
+# Database
+# -----------------------------
+DATABASES = {
+    "default": env.db(default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}")
+}
+
+# Where to point email confirmation links
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://127.0.0.1:3000")  
+# 👆 Change to your React dev server or production frontend
+
+ACCOUNT_DEFAULT_HTTP_PROTOCOL = "http"
+DEFAULT_FROM_EMAIL = "no-reply@yourdomain.com"
+
+
+
+# -----------------------------
+# Installed Apps
+# -----------------------------
 INSTALLED_APPS = [
     # Django core
     "django.contrib.admin",
@@ -44,6 +66,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "django.contrib.sites",
+    'django_json_widget',
 
     # Third-party
     "rest_framework",
@@ -52,7 +75,7 @@ INSTALLED_APPS = [
     "corsheaders",
     "axes",
 
-    # Auth feature apps
+    # Authentication
     "allauth",
     "allauth.account",
     "allauth.socialaccount",
@@ -69,28 +92,33 @@ INSTALLED_APPS = [
 ]
 
 SITE_ID = 1
-AUTH_USER_MODEL = "accounts.User"  # ✅ Custom user model
 
+# -----------------------------
+# Middleware
+# -----------------------------
 MIDDLEWARE = [
-    "corsheaders.middleware.CorsMiddleware",
+    "corsheaders.middleware.CorsMiddleware",   # must be first
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
-    "axes.middleware.AxesMiddleware",          # Brute force protection
+    "axes.middleware.AxesMiddleware",          # brute-force lockout
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "django_otp.middleware.OTPMiddleware",     # OTP sessions
-    "allauth.account.middleware.AccountMiddleware",  # Required for allauth
+    "django_otp.middleware.OTPMiddleware",     # one-time passwords
+    "allauth.account.middleware.AccountMiddleware",  # allauth requirement
 ]
 
 ROOT_URLCONF = "config.urls"
 
+# -----------------------------
+# Templates
+# -----------------------------
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [BASE_DIR / "templates"],
+        "DIRS": [BASE_DIR / "templates"],  # custom templates
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -106,7 +134,9 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
-# Password validation
+# -----------------------------
+# Password Validators
+# -----------------------------
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator", "OPTIONS": {"min_length": 8}},
@@ -123,17 +153,23 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
+# -----------------------------
 # CORS
+# -----------------------------
 CORS_ALLOW_ALL_ORIGINS = env.bool("CORS_ALLOW_ALL_ORIGINS", default=True)
 CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[])
 
+# -----------------------------
 # Internationalization
+# -----------------------------
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"
 USE_I18N = True
 USE_TZ = True
 
+# -----------------------------
 # Static & Media
+# -----------------------------
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
@@ -141,7 +177,9 @@ MEDIA_ROOT = BASE_DIR / "media"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+# -----------------------------
 # Import concern-specific settings
+# -----------------------------
 from .auth import *     # JWT/DRF/allauth/axes/otp
 from .security import * # Cookies/HSTS/CSRF
 from .email_sms import *# Email/SMS (console by default)

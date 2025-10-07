@@ -1,0 +1,12 @@
+Hello {{ user.email }},
+
+Click the link below to sign in to your account:
+
+{{ magic_url }}
+
+This link will expire at {{ expires|date:"Y-m-d H:i:s" }}.
+
+If you didn’t request this, you can ignore this email.
+
+Thanks,
+The Team
