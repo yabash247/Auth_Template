@@ -4,3 +4,6 @@
 [submodule "config"]
 	path = config
 	url = git@github.com:yabash247/authTemplate_backend__config.git
+[submodule "organizations"]
+	path = organizations
+	url = git@github.com:yabash247/authTemplate_backend__organizations.git
