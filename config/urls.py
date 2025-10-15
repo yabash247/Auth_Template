@@ -10,6 +10,7 @@ urlpatterns = [
 
     # Our custom accounts API
     path("api/auth/", include("accounts.urls")),
+    path("api/users/", include("users.urls")),
 
     # allauth email confirmation
     path("accounts/", include("allauth.urls")),

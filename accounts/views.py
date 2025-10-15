@@ -1,6 +1,6 @@
 from django.contrib.auth import login, logout, get_user_model, get_backends
 from ipware import get_client_ip
-from rest_framework import generics, permissions, status, views
+from rest_framework import generics, permissions, status, views, viewsets
 from rest_framework.response import Response
 import pyotp
 
@@ -9,10 +9,10 @@ from .serializers import RegisterSerializer, LoginSerializer, UserSerializer, JW
 from .tokens import email_verification_token, magic_link_token
 from .utils import send_magic_link_email, get_required_methods
 
-from allauth.account.models import EmailAddress, EmailConfirmation
+from allauth.account.models import EmailAddress, EmailConfirmation, EmailConfirmationHMAC
+from django.template.loader import render_to_string
 from allauth.account.views import ConfirmEmailView
 from django.shortcuts import get_object_or_404, redirect
-from allauth.account.utils import send_email_confirmation
 from rest_framework.views import APIView
 from django.contrib.auth import authenticate
 
@@ -24,7 +24,7 @@ from django.utils.timezone import now, timezone
 from django.utils.http import urlsafe_base64_encode
 from django.utils.http import urlsafe_base64_decode
 from django.utils.encoding import force_str
-
+from allauth.socialaccount.models import SocialAccount
 
 # accounts/views.py
 from django.db import transaction
@@ -58,10 +58,27 @@ class RegisterView(generics.CreateAPIView):
 
     def perform_create(self, serializer):
         user = serializer.save()
-        # Send email verification token
-        #token = email_verification_token.make_token(user)
-        #send_verification_email(user, token)
-        send_email_confirmation(self.request, user, signup=True)
+        print(f"👤 [REGISTER] Created user: {user.email}")
+
+        from allauth.account.models import EmailAddress, EmailConfirmationHMAC
+        from allauth.account.adapter import get_adapter
+
+        # Ensure the EmailAddress object exists
+        email_address, _ = EmailAddress.objects.get_or_create(user=user, email=user.email)
+        email_address.verified = False
+        email_address.primary = True
+        email_address.save()
+
+        # ✅ Create the confirmation manually (no deprecated method)
+        confirmation = EmailConfirmationHMAC(email_address)
+
+        # Use the custom adapter to send styled email with correct frontend URL
+        adapter = get_adapter()
+        adapter.send_confirmation_mail(self.request, confirmation, signup=True)
+
+        print("📧 [REGISTER] Verification email sent using CustomAccountAdapter.")
+
+
 
 class VerifyEmailView(views.APIView):
     permission_classes = [permissions.AllowAny]
@@ -80,6 +97,30 @@ class VerifyEmailView(views.APIView):
             return Response({"detail": "Email verified"})
         return Response({"detail": "Invalid or expired token"}, status=400)
     
+# ✅ Corrected version — works with frontend /verify-email/<key>/
+class VerifyEmailKeyView(views.APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request, key):
+        print(f"🔐 [TRACE] Email verification requested for key: {key}")
+
+        try:
+            confirmation = EmailConfirmationHMAC.from_key(key)
+            if not confirmation:
+                print("⚠️ [TRACE] Invalid or expired confirmation key")
+                return Response({"detail": "Invalid or expired verification link."}, status=status.HTTP_400_BAD_REQUEST)
+
+            confirmation.confirm(request)
+            user = confirmation.email_address.user
+            user.is_email_verified = True
+            user.save(update_fields=["is_email_verified"])
+
+            print(f"✅ [TRACE] Email verified for: {user.email}")
+            return Response({"detail": "Email verified successfully."}, status=status.HTTP_200_OK)
+        except Exception as e:
+            print(f"💥 [ERROR] Verification failed: {e}")
+            return Response({"detail": "Invalid or expired verification link."}, status=status.HTTP_400_BAD_REQUEST)
+
 
 class CustomConfirmEmailView(ConfirmEmailView):
     """
@@ -279,7 +320,9 @@ class AdaptiveAuthMixin:
         return None  # ✅ Passed all required checks
 
 
-
+# --------------------------------------------
+# Adaptive Multi-Step LoginView (with diagnostics)
+# --------------------------------------------
 class LoginView(views.APIView):
     permission_classes = [permissions.AllowAny]
 
@@ -293,15 +336,24 @@ class LoginView(views.APIView):
         print(f"🔑 [TRACE] Remember me: {remember_me}")
 
 
-        # ❌ Account state checks
+        # ✅ Step 1: Basic account checks
         if user.is_disabled:
-            return Response({"detail": "Account is disabled. Contact support."}, status=403)
+            return Response(
+                {"detail": "Account is disabled. Contact support.", "required_methods": []},
+                status=403,
+            )
 
         if user.is_soft_deleted:
-            return Response({"detail": "Account is deleted. Contact support."}, status=403)
+            return Response(
+                {"detail": "Account is deleted. Contact support.", "required_methods": []},
+                status=403,
+            )
 
         if not user.is_email_verified:
-            return Response({"detail": "Email verification required"}, status=403)
+            return Response(
+                {"detail": "Email verification required.", "required_methods": []},
+                status=403,
+            )
 
         '''
         
@@ -319,22 +371,47 @@ class LoginView(views.APIView):
             )
         '''
         # --------------------------------------------
-        # ✅ NEW: Adaptive Authentication Enforcement
+        # ✅ Step 2: Adaptive requirement discovery
         # --------------------------------------------
         required_methods = get_required_methods(user, "login")
         print(f"🔎 [TRACE] Required methods for login: {required_methods}")
 
-        # Require security phrase if configured
+
+        # ✅ Step 3: Enforce per-user requirements
+
+        # --- Security Phrase ---
         if "security_phrase" in required_methods:
             phrase = request.data.get("security_phrase")
-            if not phrase or not hasattr(user, "security_phrase_policy"):
-                return Response({"detail": "Security phrase required."}, status=403)
-            if not user.security_phrase_policy.verify_phrase(phrase):
-                return Response({"detail": "Invalid security phrase."}, status=403)
+            if not phrase:
+                print(f"🚫 [TRACE] Missing security_phrase for {user.email}")
+                return Response(
+                    {
+                        "detail": "Security phrase required.",
+                        "required_methods": ["password", "security_phrase"],
+                    },
+                    status=403,
+                )
+
+            if not hasattr(user, "security_phrase_policy") or not user.security_phrase_policy.verify_phrase(phrase):
+                print(f"🚫 [TRACE] Invalid security phrase for {user.email}")
+                return Response(
+                    {
+                        "detail": "Invalid security phrase.",
+                        "required_methods": ["password", "security_phrase"],
+                    },
+                    status=403,
+                )
 
         # Require Google OAuth if configured
         if "google" in required_methods and not user.socialaccount_set.filter(provider="google").exists():
-            return Response({"detail": "Google authentication required."}, status=403)
+            print(f"🚫 [TRACE] Google auth required for {user.email}")
+            return Response(
+                {
+                    "detail": "Google authentication required.",
+                    "required_methods": ["password", "google"],
+                },
+                status=403,
+            )
 
         # If OTP required --- OTP Enforcement (email/sms/totp/otp unified) ---
         if any(m in required_methods for m in ["otp", "email_otp", "sms_otp", "totp"]):
@@ -351,14 +428,20 @@ class LoginView(views.APIView):
 
             if not valid_otp:
                 print(f"🚫 [TRACE] OTP required for {user.email} but missing or invalid.")
-                return Response({"detail": "OTP required or invalid."}, status=403)
+                return Response(
+                    {
+                        "detail": "OTP required or invalid.",
+                        "required_methods": ["password", "otp"],
+                    },
+                    status=403,
+                )
             
             return Response(
                 {"mfa_required": True, "methods": required_methods},
                 status=200,
             )
         
-        # Proceed normally
+        # ✅ Step 4: Successful login — generate JWT
         payload = JWTSerializer.for_user(user, remember_me=request.data.get("remember_me", False))
         print(f"✅ Successful login for {user.email} at {now()}")
         return Response(payload, status=200)
@@ -544,7 +627,6 @@ class MFAVerifyView(views.APIView):
 # NOTE: WebAuthn endpoints would go here (register/authenticate begin/complete).
 # For brevity they are scaffolded in README with library 'webauthn'.
 
-
 class ResendVerificationEmailView(APIView):
     """
     API endpoint to resend email verification.
@@ -553,39 +635,99 @@ class ResendVerificationEmailView(APIView):
     """
     permission_classes = [permissions.AllowAny]
 
+    def _send_verification_email(self, request, user, email):
+        """
+        Custom email sending that works even outside full Django context.
+        Uses SMTP backend directly and allauth HMAC token for security.
+        """
+        try:
+            email_address, _ = EmailAddress.objects.get_or_create(user=user, email=email)
+            if email_address.verified:
+                print(f"✅ [TRACE] Email already verified for {email}")
+                return {"detail": "Email is already verified."}, status.HTTP_400_BAD_REQUEST
+
+            # Generate confirmation key (works even without allauth request context)
+            # inside _send_verification_email (ResendVerificationEmailView)
+            confirmation = EmailConfirmationHMAC(email_address)
+
+            print("🧭 [TRACE] FRONTEND_URL from settings:", getattr(settings, "FRONTEND_URL", None))
+            frontend_url = getattr(settings, "FRONTEND_URL", "http://127.0.0.1:3000")
+            verify_url = f"{frontend_url}/verify-email/{confirmation.key}"
+
+            print(f"🔑 [TRACE] Generated confirmation link: {verify_url}")
+
+            context = {
+                "user": user,
+                "user_email": user.email,
+                "verify_url": verify_url,            # main alias
+                "activate_url": verify_url,          # alias some templates use
+                "verification_link": verify_url,     # another alias
+                "site_name": getattr(settings, "SITE_NAME", "Auth Template"),
+            }
+
+            subject = f"Verify your email for {context['site_name']}"
+            text_body = render_to_string("emails/verify_email.txt", context)
+            html_body = render_to_string("emails/verify_email.html", context)
+
+            print("📦 [TRACE] Email context data:", context)
+            print("📄 [TRACE] Rendered text body:\n", text_body)
+            print("📄 [TRACE] Rendered HTML body:\n", html_body)
+
+
+            print(f"📨 [TRACE] Sending verification email to {email} via SMTP...")
+
+            msg = EmailMultiAlternatives(
+                subject,
+                text_body,
+                settings.DEFAULT_FROM_EMAIL,
+                [email],
+            )
+            msg.attach_alternative(html_body, "text/html")
+            msg.send(fail_silently=False)
+
+            print(f"✅ [TRACE] Verification email successfully sent to {email}")
+            return {"detail": f"Verification email sent to {email}"}, status.HTTP_200_OK
+
+        except Exception as e:
+            print(f"⚠️ [ERROR] Failed to send verification email: {e}")
+            return {"detail": "Error sending verification email."}, status.HTTP_500_INTERNAL_SERVER_ERROR
+
     def post(self, request, *args, **kwargs):
-        # Case 1: Logged-in user
+        # 🧩 Case 1: Logged-in user
         if request.user.is_authenticated:
+            print(f"👤 [TRACE] Authenticated user requested resend: {request.user.email}")
             email_address = EmailAddress.objects.filter(user=request.user, verified=False).first()
+
             if not email_address:
+                print("⚠️ [TRACE] No unverified email found for logged-in user.")
                 return Response(
                     {"detail": "No unverified email found."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            send_email_confirmation(request, request.user, signup=False)
-            return Response(
-                {"detail": f"Verification email sent to {email_address.email}"},
-                status=status.HTTP_200_OK,
-            )
 
-        # Case 2: Email-only input (user not logged in)
+            data, code = self._send_verification_email(request, request.user, email_address.email)
+            return Response(data, status=code)
+
+        # 🧩 Case 2: Email-only input (user not logged in)
         email = request.data.get("email")
+        print(f"📧 [TRACE] Resend verification requested for email: {email}")
+
         if not email:
             return Response({"detail": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             user = User.objects.get(email=email)
+            print(f"👤 [TRACE] Found user for email: {email}")
         except User.DoesNotExist:
-            # Don’t leak which emails exist
-            return Response({"detail": "If this account exists, a verification email has been sent."}, status=status.HTTP_200_OK)
+            print(f"⚠️ [TRACE] No user found for {email}, returning generic success message.")
+            # Prevent email enumeration
+            return Response(
+                {"detail": "If this account exists, a verification email has been sent."},
+                status=status.HTTP_200_OK,
+            )
 
-        email_address, _ = EmailAddress.objects.get_or_create(user=user, email=email)
-        if email_address.verified:
-            return Response({"detail": "Email is already verified."}, status=status.HTTP_400_BAD_REQUEST)
-
-        send_email_confirmation(request, user, signup=False)
-        return Response({"detail": "Verification email sent."}, status=status.HTTP_200_OK)
-
+        data, code = self._send_verification_email(request, user, email)
+        return Response(data, status=code)
 
 
 class AccountLockView(AdaptiveAuthMixin, views.APIView):
@@ -1025,8 +1167,6 @@ class WebAuthnAuthCompleteView(views.APIView):
         from .serializers import JWTSerializer
         return Response(JWTSerializer.for_user(user), status=200)
 
-# views.py
-from rest_framework import viewsets
 
 class AuthPolicyViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
@@ -1065,3 +1205,31 @@ class UpdateSecurityPhraseView(generics.UpdateAPIView):
         serializer.is_valid(raise_exception=True)
         serializer.save(instance=None)
         return Response({"detail": "Security phrase updated successfully."}, status=200)
+
+
+
+
+class LinkedAccountsView(generics.ListAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+    def get(self, request):
+        accounts = SocialAccount.objects.filter(user=request.user)
+        return Response([{"provider": a.provider, "uid": a.uid, "extra": a.extra_data} for a in accounts])
+
+class UnlinkAccountView(generics.DestroyAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+    def delete(self, request, provider):
+        SocialAccount.objects.filter(user=request.user, provider=provider).delete()
+        return Response({"detail": f"{provider} account unlinked."})
+
+
+class GoogleLoginJWTView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        email = request.data.get("email")
+        account = SocialAccount.objects.filter(provider="google", user__email=email).first()
+        if not account:
+            return Response({"detail": "No linked Google account."}, status=400)
+        user = account.user
+        payload = JWTSerializer.for_user(user)
+        return Response(payload, status=200)

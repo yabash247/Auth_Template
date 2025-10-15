@@ -25,6 +25,7 @@ REST_FRAMEWORK = {
         "password_reset": "5/min",
         "magic_link": "5/min",
     },
+    "DEFAULT_FILTER_BACKENDS": ["django_filters.rest_framework.DjangoFilterBackend"]
 }
 
 # config/settings/auth.py
@@ -50,7 +51,21 @@ ACCOUNT_UNIQUE_EMAIL = True                # Ensure unique emails
 
 
 ACCOUNT_ADAPTER = "accounts.adapters.CustomAccountAdapter"
-ACCOUNT_EMAIL_VERIFICATION = "mandatory"
+SOCIALACCOUNT_ADAPTER = "accounts.adapters.CustomSocialAccountAdapter"
+ACCOUNT_EMAIL_VERIFICATION = "none"
+SOCIALACCOUNT_EMAIL_VERIFICATION = "none"
+SOCIALACCOUNT_LOGIN_ON_GET = True
+
+
+# 📧 Email setup
+EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+EMAIL_HOST = "smtp.gmail.com"        # or your mail provider
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "no_reply@gmail.com")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "your-app-password")
+DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
+
 
 # Redirects after login/logout
 LOGIN_REDIRECT_URL = "/app/"
@@ -81,12 +96,23 @@ SOCIALACCOUNT_PROVIDERS = {
         "APP": {
             "client_id": os.getenv("GOOGLE_CLIENT_ID", ""),
             "secret": os.getenv("GOOGLE_CLIENT_SECRET", ""),
-            "key": "",
         },
         "SCOPE": ["email", "profile"],
         "AUTH_PARAMS": {"access_type": "offline"},
-    }
+        "OAUTH_PKCE_ENABLED": True,  # ✅ PKCE for public clients
+    },
+    "apple": {"APP": {"client_id": "", "secret": ""}},
+    "microsoft": {"APP": {"client_id": "", "secret": ""}},
+    "github": {"APP": {"client_id": "", "secret": ""}},
+    "facebook": {"APP": {"client_id": "", "secret": ""}},
+    "discord": {"APP": {"client_id": "", "secret": ""}},
+    "slack": {"APP": {"client_id": "", "secret": ""}},
+    "twitter": {"APP": {"client_id": "", "secret": ""}},
+    "linkedin_oauth2": {"APP": {"client_id": "", "secret": ""}},
+    "spotify": {"APP": {"client_id": "", "secret": ""}},
+    "dropbox": {"APP": {"client_id": "", "secret": ""}},
 }
+
 
 
 # Axes (brute force protection)

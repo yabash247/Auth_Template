@@ -79,16 +79,29 @@ INSTALLED_APPS = [
     "allauth",
     "allauth.account",
     "allauth.socialaccount",
-    "allauth.socialaccount.providers.google",
     "dj_rest_auth",
     "dj_rest_auth.registration",
     "django_otp",
     "django_otp.plugins.otp_totp",
     "two_factor",
+    # Social auth providers (add/remove as needed)
+    "allauth.socialaccount.providers.google",
+    "allauth.socialaccount.providers.apple",
+    "allauth.socialaccount.providers.microsoft",
+    "allauth.socialaccount.providers.github",
+    "allauth.socialaccount.providers.facebook",
+    "allauth.socialaccount.providers.discord",
+    "allauth.socialaccount.providers.slack",
+    "allauth.socialaccount.providers.twitter",
+    "allauth.socialaccount.providers.linkedin_oauth2",
+    "allauth.socialaccount.providers.spotify",
+    "allauth.socialaccount.providers.dropbox",
+
 
     # Local apps
     "accounts",
     "organizations",
+    "users",
 ]
 
 SITE_ID = 1
@@ -176,6 +189,8 @@ MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+
 
 # -----------------------------
 # Import concern-specific settings

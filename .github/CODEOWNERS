@@ -1,0 +1,13 @@
+# Backend - only backend devs can touch backend APIs
+backend/api/*            @backend-dev-team
+
+# Frontend - frontend team owns all React components
+frontend/*               @frontend-team
+
+# Authentication & Security - only you (owner)
+accounts/*               @yabash247
+config/*                 @yabash247
+.env                     @yabash247
+
+# Shared utilities - both backend and frontend teams
+shared/*                 @backend-dev-team @frontend-team

@@ -1,7 +1,7 @@
 # accounts/urls.py
 from django.urls import path
 from .views import (
-    RegisterView, VerifyEmailView,
+    RegisterView, UnlinkAccountView, VerifyEmailView,
     ForgotPasswordView, ResetPasswordView,
     LoginView, LogoutView, MeView,
     MagicLinkRequestView, MagicLinkConsumeView,
@@ -11,21 +11,28 @@ from .views import (
     AccountUnlockView, AccountDisableView, AccountEnableView,
     AccountSoftDeleteView, AccountRestoreView, AccountHardDeleteView,
     SuspendAccountView, ReAuthView,
-    RequestDeleteAccountView,
+    RequestDeleteAccountView,LinkedAccountsView,
     CancelDeleteAccountView,
-    HardDeleteAccountView,
+    HardDeleteAccountView, VerifyEmailKeyView
 )
 
 urlpatterns = [
-    # Core registration & login
+    # Core registration 
     path("register/", RegisterView.as_view(), name="register"),
+    path("social/accounts/", LinkedAccountsView.as_view(), name="linked-accounts"),
+    path("social/unlink/<str:provider>/", UnlinkAccountView.as_view(), name="unlink-account"),
+
+    # Login/Logout
     path("login/", LoginView.as_view(), name="login"),
     path("logout/", LogoutView.as_view(), name="logout"),
+
+    # Current user info
     path("me/", MeView.as_view(), name="me"),
 
     # Email flows
     path("email/verify/", VerifyEmailView.as_view(), name="email-verify"),
     path("resend-verification/", ResendVerificationEmailView.as_view(), name="resend-verification"),
+    path("verify-email/<str:key>/", VerifyEmailKeyView.as_view(), name="verify-email-key"),
 
     # Password reset flows
     path("password/forgot/", ForgotPasswordView.as_view(), name="password-forgot"),
