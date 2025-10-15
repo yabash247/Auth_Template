@@ -7,3 +7,6 @@
 [submodule "organizations"]
 	path = organizations
 	url = git@github.com:yabash247/authTemplate_backend__organizations.git
+[submodule "users"]
+	path = users
+	url = git@github.com:yabash247/authTemplate_backend__users.git
