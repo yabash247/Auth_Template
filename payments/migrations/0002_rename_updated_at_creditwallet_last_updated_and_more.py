@@ -10,10 +10,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ("payments", "0001_initial"),
-        (
-            "scrimmages",
-            "0003_scrimmagecategory_remove_scrimmage_auto_pay_enabled_and_more",
-        ),
+        ('scrimmages', '0001_initial'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 

@@ -1,10 +1,17 @@
-# scrimmages/urls.py
 from rest_framework.routers import DefaultRouter
-from .views import ScrimmageViewSet, LeagueViewSet, PerformanceStatViewSet
+from .views import (
+    ScrimmageViewSet, ScrimmageCategoryViewSet, ScrimmageTypeViewSet,
+    ScrimmageTemplateViewSet, RecurrenceRuleViewSet, ScrimmageMediaViewSet,
+    PerformanceStatViewSet
+)
 
 router = DefaultRouter()
-router.register(r"scrimmages", ScrimmageViewSet, basename="scrimmages")
-router.register(r"leagues", LeagueViewSet, basename="leagues")
-router.register(r"stats", PerformanceStatViewSet, basename="scrimmage-stats")
+router.register("scrimmages", ScrimmageViewSet)
+router.register("scrimmage-categories", ScrimmageCategoryViewSet)
+router.register("scrimmage-types", ScrimmageTypeViewSet)
+router.register("scrimmage-templates", ScrimmageTemplateViewSet)
+router.register("recurrence-rules", RecurrenceRuleViewSet)
+router.register("scrimmage-media", ScrimmageMediaViewSet)
+router.register("performance-stats", PerformanceStatViewSet)
 
 urlpatterns = router.urls

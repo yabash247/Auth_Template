@@ -1,266 +1,414 @@
-# scrimmages/models.py
 from __future__ import annotations
+
 from django.conf import settings
+from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models
-from django.utils.text import slugify
-from django.core.exceptions import ValidationError
+from django.db.models import Q
+from django.utils import timezone
 
 User = settings.AUTH_USER_MODEL
 
+from organizations.models import Location  # 👈 add this import at the top
 
+
+# ============================================================
+# ✅ Scrimmage Category (user-suggested, admin-approved)
+#   - Unapproved categories are visible only to their creator.
+#   - Approved names must be globally unique.
+# ============================================================
 class ScrimmageCategory(models.Model):
-    name = models.CharField(max_length=80, unique=True)
-    slug = models.SlugField(max_length=100, unique=True, blank=True)
-
-    def save(self, *args, **kwargs):
-        if not self.slug:
-            base = slugify(self.name) or "category"
-            self.slug = base if not ScrimmageCategory.objects.filter(slug=base).exists() else f"{base}-{self.pk or ''}".strip("-")
-        return super().save(*args, **kwargs)
-
-    def __str__(self): return self.name
-
-
-class ScrimmageType(models.Model):
-    """
-    Each type can define its dynamic field schema.
-    Example schema (you own the format):
-    {
-      "player_level": {"py_type":"str","choices":["Beginner","Intermediate","Pro"],"required":true},
-      "min_age":{"py_type":"int","ge":8,"le":60},
-      "referee_required":{"py_type":"bool","required":false, "default": false}
-    }
-    """
-    category = models.ForeignKey(ScrimmageCategory, on_delete=models.CASCADE, related_name="types")
-    name = models.CharField(max_length=120)
-    slug = models.SlugField(max_length=160, unique=True, blank=True)
-    custom_field_schema = models.JSONField(default=dict, blank=True)  # creator form generator + validator
+    name = models.CharField(max_length=100)
+    created_by = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="scrimmage_categories"
+    )
+    approved = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        unique_together = [("category", "name")]
+        indexes = [
+            models.Index(fields=["approved", "created_at"]),
+        ]
+        constraints = [
+            # Prevent two approved categories with the same name
+            models.UniqueConstraint(
+                fields=["name"],
+                condition=Q(approved=True),
+                name="uniq_public_category_name",
+            ),
+            # A user can propose the same name only once
+            models.UniqueConstraint(
+                fields=["name", "created_by"],
+                name="uniq_user_category_proposal",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+# ============================================================
+# ✅ Scrimmage Type (user-created, admin-approved)
+#   - Linked to a Category.
+#   - Optional on Scrimmage (acts like a format: "3v3", "Hackathon").
+#   - Unapproved types are visible only to their creator.
+# ============================================================
+class ScrimmageType(models.Model):
+    category = models.ForeignKey(
+        ScrimmageCategory, on_delete=models.CASCADE, related_name="types"
+    )
+    name = models.CharField(max_length=120)
+    created_by = models.ForeignKey(
+        User, 
+        on_delete=models.CASCADE, 
+        related_name="scrimmage_types",
+        null=True,
+        blank=True
+    )
+    approved = models.BooleanField(default=False)
+    # Optional: schema for dynamic/extra fields the frontend may render
+    custom_field_schema = models.JSONField(default=dict, blank=True)
+
+    class Meta:
         ordering = ["category__name", "name"]
+        indexes = [
+            models.Index(fields=["approved", "category"]),
+        ]
+        constraints = [
+            # Prevent duplicate public type names within a category
+            models.UniqueConstraint(
+                fields=["category", "name"],
+                condition=Q(approved=True),
+                name="uniq_public_type_per_category",
+            ),
+            # A user can propose the same (category, name) only once
+            models.UniqueConstraint(
+                fields=["category", "name", "created_by"],
+                name="uniq_user_type_proposal",
+            ),
+        ]
 
-    def save(self, *args, **kwargs):
-        if not self.slug:
-            base = slugify(f"{self.category.name}-{self.name}")[:150] or "type"
-            slug = base
-            i = 1
-            while ScrimmageType.objects.filter(slug=slug).exclude(pk=self.pk).exists():
-                i += 1
-                slug = f"{base}-{i}"
-            self.slug = slug
-        return super().save(*args, **kwargs)
-
-    def __str__(self): return f"{self.category.name} · {self.name}"
+    def __str__(self) -> str:
+        return f"{self.category.name} · {self.name}"
 
 
+# ============================================================
+# ✅ Scrimmage (Meetup-style)
+#   - Visibility, location (map-ready), scheduling
+#   - Capacity, waitlist, entry fee, teams JSON
+#   - Ratings aggregates
+#   - Credit gating supported via business logic in views/payments
+# ============================================================
 class Scrimmage(models.Model):
-    VISIBILITY = [("public", "Public"), ("private", "Private")]
-    STATUS = [("draft","Draft"),("published","Published"),("cancelled","Cancelled")]
-
-    creator = models.ForeignKey(User, on_delete=models.CASCADE, related_name="scrimmages_created")
-    group = models.ForeignKey("groups.Group", null=True, blank=True, on_delete=models.SET_NULL, related_name="scrimmages")
-
-    title = models.CharField(max_length=255)
-    slug = models.SlugField(max_length=280, unique=True, blank=True)
-    description = models.TextField(blank=True)
-
-    # NEW: taxonomy + dynamic fields
-    scrimmage_type = models.ForeignKey(ScrimmageType, on_delete=models.PROTECT, related_name="scrimmages")
-    custom_fields = models.JSONField(default=dict, blank=True)  # validated against scrimmage_type.custom_field_schema
-
-    # Location (shared object lives in organizations app)
-    location = models.ForeignKey("organizations.Location", null=True, blank=True, on_delete=models.SET_NULL, related_name="scrimmages")
-    location_name = models.CharField(max_length=255, blank=True)  # snapshot for history
-    address = models.CharField(max_length=512, blank=True)
-
-    start_time = models.DateTimeField()
-    end_time = models.DateTimeField()
-
-    is_recurring = models.BooleanField(default=False)
-    # If you also want raw RRULE text for iCal export:
-    rrule = models.CharField(max_length=255, blank=True)
-
-    max_participants = models.PositiveIntegerField(default=10)
-    visibility = models.CharField(max_length=10, choices=VISIBILITY, default="public")
-    tags = models.JSONField(default=list, blank=True)
-
-    # monetization
-    entry_fee = models.DecimalField(max_digits=8, decimal_places=2, default=0)
-    currency = models.CharField(max_length=8, default="USD")
-    team_pay_enabled = models.BooleanField(default=False)
-    organizer_fee_percent = models.DecimalField(max_digits=5, decimal_places=2, default=0)
-    organizer_fee_flat = models.DecimalField(max_digits=8, decimal_places=2, default=0)
-    prize_pool_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-
-    CATEGORY_CHOICES = [
-        ("basketball", "Basketball"),
-        ("football", "Football"),
-        ("soccer", "Soccer"),
-        ("volleyball", "Volleyball"),
-        ("other", "Other"),
-    ]
-
-    category = models.CharField(
-        max_length=32,
-        choices=CATEGORY_CHOICES,
-        default="basketball"
+    VISIBILITY = (
+        ("public", "Public"),
+        ("members", "Members"),
+        ("private", "Private"),
+    )
+    STATUS = (
+        ("draft", "Draft"),
+        ("upcoming", "Upcoming"),
+        ("ongoing", "Ongoing"),
+        ("completed", "Completed"),
+        ("cancelled", "Cancelled"),
     )
 
-    status = models.CharField(max_length=12, choices=STATUS, default="published")
+    title = models.CharField(max_length=160)
+    description = models.TextField(blank=True)
+
+    host = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="hosted_scrimmages"
+    )
+    group = models.ForeignKey(
+        "groups.Group",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="scrimmages",
+    )
+    league = models.ForeignKey(
+        "leagues.League",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="scrimmages",
+    )
+
+    category = models.ForeignKey(
+        ScrimmageCategory,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="scrimmages",
+    )
+    scrimmage_type = models.ForeignKey(
+        ScrimmageType,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="scrimmages",
+        help_text="Optional format/type (e.g., 3v3, hackathon, cookoff).",
+    )
+
+    visibility = models.CharField(max_length=10, choices=VISIBILITY, default="public")
+
+    # Location (map-friendly)
+    #location_name = models.CharField(max_length=160, blank=True)
+    location = models.ForeignKey(
+        Location,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="scrimmages",
+        help_text="Select an organization location for this scrimmage."
+    )
+    address = models.CharField(max_length=255, blank=True)
+    latitude = models.FloatField(null=True, blank=True)
+    longitude = models.FloatField(null=True, blank=True)
+
+    # Schedule
+    start_datetime = models.DateTimeField()
+    end_datetime = models.DateTimeField()
+
+    # Capacity
+    max_participants = models.PositiveIntegerField(default=20)
+    waitlist_enabled = models.BooleanField(default=True)
+
+    # Payments
+    entry_fee = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    currency = models.CharField(max_length=6, default="USD")
+    credit_required = models.BooleanField(
+        default=False,
+        help_text="True when creator lacked credits; publish after payment/credit.",
+    )
+    is_paid = models.BooleanField(
+        default=False, help_text="Derived from entry_fee > 0"
+    )
+
+    # Flexible team structure
+    # Example: {"Team A": [user_id,...], "Team B": [user_id,...]}
+    teams = models.JSONField(default=dict, blank=True)
+
+    # Ratings aggregate
+    rating_avg = models.FloatField(default=0)
+    rating_count = models.PositiveIntegerField(default=0)
+
+    # Lifecycle
+    status = models.CharField(max_length=10, choices=STATUS, default="draft")
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    class Meta: ordering = ["start_time"]
+    class Meta:
+        ordering = ["start_datetime"]
+        indexes = [
+            models.Index(fields=["status", "start_datetime"]),
+            models.Index(fields=["visibility", "start_datetime"]),
+            models.Index(fields=["category", "start_datetime"]),
+        ]
 
-    def __str__(self): return self.title
+    def __str__(self) -> str:
+        return f"{self.title} ({self.status})"
 
     def clean(self):
-        # simple time sanity
-        if self.end_time and self.start_time and self.end_time <= self.start_time:
-            raise ValidationError({"end_time": "End time must be after start time."})
+        from django.core.exceptions import ValidationError
 
-        # validate custom_fields with Pydantic (see helper below)
-        from .validators import validate_custom_fields
-        errors = validate_custom_fields(self.scrimmage_type, self.custom_fields)
-        if errors:
-            raise ValidationError({"custom_fields": errors})
+        # Only check if both dates are provided
+        if self.start_datetime and self.end_datetime:
+            if self.end_datetime <= self.start_datetime:
+                raise ValidationError("End time must be after start time.")
+
 
     def save(self, *args, **kwargs):
-        if not self.slug:
-            base = slugify(self.title) or "scrimmage"
-            slug = base
-            i = 1
-            while Scrimmage.objects.filter(slug=slug).exclude(pk=self.pk).exists():
-                i += 1
-                slug = f"{base}-{i}"
-            self.slug = slug
+        self.is_paid = (self.entry_fee or 0) > 0
         super().save(*args, **kwargs)
 
+    @property
+    def spots_taken(self) -> int:
+        return self.rsvps.filter(
+            status__in=["going", "checked_in", "completed", "pending_payment"]
+        ).count()
+
+    @property
+    def spots_left(self) -> int:
+        taken = self.rsvps.filter(
+            status__in=["going", "checked_in", "completed"]
+        ).count()
+        return max(self.max_participants - taken, 0)
 
 
+# ============================================================
+# ✅ RSVP (attendance, role, feedback, rating, waitlist)
+# ============================================================
+class ScrimmageRSVP(models.Model):
+    STATUS = (
+        ("interested", "Interested"),
+        ("pending_payment", "Pending Payment"),
+        ("waitlisted", "Waitlisted"),
+        ("going", "Going"),
+        ("checked_in", "Checked In"),
+        ("completed", "Completed"),
+        ("cancelled", "Cancelled"),
+    )
+    ROLE = (
+        ("player", "Player"),
+        ("coach", "Coach"),
+        ("referee", "Referee"),
+        ("observer", "Observer"),
+    )
+
+    scrimmage = models.ForeignKey(
+        Scrimmage, on_delete=models.CASCADE, related_name="rsvps"
+    )
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="scrimmage_rsvps"
+    )
+
+    status = models.CharField(max_length=20, choices=STATUS, default="interested")
+    role = models.CharField(max_length=16, choices=ROLE, default="player")
+
+    team_name = models.CharField(max_length=50, blank=True, null=True)
+    score = models.CharField(max_length=50, blank=True, null=True)
+
+    # Post-event feedback & rating
+    feedback = models.TextField(blank=True)
+    rating = models.PositiveSmallIntegerField(
+        null=True, blank=True, validators=[MinValueValidator(1), MaxValueValidator(5)]
+    )
+
+    checked_in_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["scrimmage", "status", "created_at"]),
+            models.Index(fields=["user", "scrimmage"]),
+        ]
+        unique_together = ("scrimmage", "user")
+
+    def __str__(self) -> str:
+        return f"{self.user} → {self.scrimmage} [{self.status}/{self.role}]"
 
 
+# ============================================================
+# ✅ Participant Media (host moderation + limits via views)
+# ============================================================
+class ScrimmageMedia(models.Model):
+    scrimmage = models.ForeignKey(
+        Scrimmage, on_delete=models.CASCADE, related_name="media_files"
+    )
+    uploader = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="uploaded_scrimmage_media"
+    )
+    media = models.ForeignKey(
+        "media.Media", on_delete=models.CASCADE, related_name="scrimmage_links"
+    )
 
+    caption = models.CharField(max_length=255, blank=True)
+    approved = models.BooleanField(default=True)
+    file_size = models.BigIntegerField(default=0)  # bytes
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["scrimmage", "approved", "created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.scrimmage.title} – {self.uploader}"
+
+
+# ============================================================
+# ✅ Recurrence Rule (manual mgmt command/cron support)
+#   - Use a management command to scan active rules and create
+#     the next occurrence(s) based on frequency/interval.
+# ============================================================
 class RecurrenceRule(models.Model):
-    FREQ = [("weekly","Weekly"),("monthly","Monthly")]
-    scrimmage = models.OneToOneField(Scrimmage, on_delete=models.CASCADE, related_name="recurrence_rule")
+    FREQ = (("weekly", "Weekly"), ("monthly", "Monthly"))
+
+    scrimmage = models.OneToOneField(
+        Scrimmage, on_delete=models.CASCADE, related_name="recurrence_rule"
+    )
     frequency = models.CharField(max_length=20, choices=FREQ)
-    interval = models.PositiveIntegerField(default=1)         # every N weeks/months
+    interval = models.PositiveIntegerField(default=1)  # every N weeks/months
     day_of_week = models.CharField(max_length=9, blank=True)  # e.g., "saturday"
     start_date = models.DateField()
     end_date = models.DateField(null=True, blank=True)
     active = models.BooleanField(default=True)
 
-    def __str__(self): return f"{self.scrimmage.title} · {self.frequency}/{self.interval}"
-
-
-class ScrimmageTemplate(models.Model):
-    creator = models.ForeignKey(User, on_delete=models.CASCADE, related_name="scrimmage_templates")
-    title = models.CharField(max_length=255)
-    scrimmage_type = models.ForeignKey(ScrimmageType, on_delete=models.CASCADE)
-    base_settings = models.JSONField(default=dict, blank=True)  # everything to clone: times, fees, rules, custom_fields, location_id snapshot
-    is_shared = models.BooleanField(default=False)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self): return self.title
-
-
-class ScrimmageParticipation(models.Model):
-    ROLES = [("player","Player"),("coach","Coach"),("referee","Referee"),("observer","Observer")]
-    STATUS = [("invited","Invited"),("confirmed","Confirmed"),("declined","Declined"),("checked_in","Checked In")]
-
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="scrimmage_participations")
-    scrimmage = models.ForeignKey(Scrimmage, on_delete=models.CASCADE, related_name="participants")
-    role = models.CharField(max_length=16, choices=ROLES, default="player")
-    status = models.CharField(max_length=16, choices=STATUS, default="confirmed")
-    rating = models.FloatField(default=0)
-    notes = models.TextField(blank=True)
-    joined_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        unique_together = [("user","scrimmage")]
-        ordering = ["-joined_at"]
-
-    def __str__(self): return f"{self.user} → {self.scrimmage} ({self.status})"
-
-
-
-class League(models.Model):
-    organizer = models.ForeignKey(User, on_delete=models.CASCADE, related_name="leagues")
-    group = models.ForeignKey("groups.Group", null=True, blank=True, on_delete=models.SET_NULL, related_name="leagues")
-    name = models.CharField(max_length=255)
-    slug = models.SlugField(max_length=280, unique=True, blank=True)
-    category = models.CharField(max_length=32, choices=Scrimmage.CATEGORY_CHOICES, default="basketball")
-    description = models.TextField(blank=True)
-    rules = models.TextField(blank=True)
-    commitment_level = models.CharField(max_length=100, blank=True)
-
-    start_date = models.DateField()
-    end_date = models.DateField()
-    is_active = models.BooleanField(default=True)
-
-    max_teams = models.PositiveIntegerField(default=16)
-    team_size_min = models.PositiveIntegerField(default=3)
-    team_size_max = models.PositiveIntegerField(default=10)
-
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering = ["name"]
-
-    def __str__(self):
-        return self.name
-
-    def save(self, *args, **kwargs):
-        if not self.slug:
-            base = slugify(self.name) or "league"
-            self.slug = base
-            i = 1
-            Model = self.__class__
-            while Model.objects.filter(slug=self.slug).exclude(pk=self.pk).exists():
-                i += 1
-                self.slug = f"{base}-{i}"
-        super().save(*args, **kwargs)
-
-
-class LeagueTeam(models.Model):
-    league = models.ForeignKey(
-        League,
-        on_delete=models.CASCADE,
-        related_name="teams",
-        null=True,     # ✅ add this
-        blank=True,    # ✅ add this
+    # Behavior flags
+    auto_generate = models.BooleanField(
+        default=True, help_text="When processed, create next occurrences automatically."
     )
-    # tie teams to Groups (your existing team container), or use a plain name
-    group = models.ForeignKey("groups.Group", null=True, blank=True, on_delete=models.SET_NULL, related_name="league_teams")
-    name = models.CharField(max_length=255, blank=True)
-    owner = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name="owned_league_teams")
+    suggest_similar = models.BooleanField(
+        default=True, help_text="Suggest this pattern in create forms."
+    )
 
-    join_code = models.CharField(max_length=12, blank=True)
+    class Meta:
+        indexes = [
+            models.Index(fields=["active", "frequency", "interval"]),
+        ]
 
-    wins = models.PositiveIntegerField(default=0)
-    losses = models.PositiveIntegerField(default=0)
-    draws = models.PositiveIntegerField(default=0)
-    points = models.IntegerField(default=0)
+    def __str__(self) -> str:
+        return f"{self.scrimmage.title} · {self.frequency}/{self.interval}"
+
+
+# ============================================================
+# ✅ Templates (shareable; admin-approved to go public)
+#   - base_settings can store any fields used to prefill a Scrimmage.
+# ============================================================
+class ScrimmageTemplate(models.Model):
+    creator = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="scrimmage_templates"
+    )
+    title = models.CharField(max_length=255)
+    scrimmage_type = models.ForeignKey(
+        ScrimmageType, on_delete=models.SET_NULL, null=True, blank=True
+    )
+
+    base_settings = models.JSONField(
+        default=dict, blank=True, help_text="Prefill payload for creating scrimmages."
+    )
+
+    # Sharing & approval
+    is_shared = models.BooleanField(
+        default=False, help_text="Visible to others if approved."
+    )
+    approved = models.BooleanField(
+        default=False, help_text="Admin approval required for public use."
+    )
+    is_public = models.BooleanField(
+        default=False, help_text="Listed in global template library once approved."
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        unique_together = [("league", "name")]
-        ordering = ["-points", "name"]
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["is_shared", "approved", "is_public"]),
+        ]
 
-    def __str__(self):
-        return self.name or (self.group.name if self.group_id else f"Team {self.pk}")
+    def __str__(self) -> str:
+        return self.title
 
 
+# ============================================================
+# ✅ Performance Statistics (sports/creative scoring)
+# ============================================================
 class PerformanceStat(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="performance_stats")
-    scrimmage = models.ForeignKey(Scrimmage, on_delete=models.CASCADE, related_name="stats")
-    metrics = models.JSONField(default=dict, blank=True)  # sport/instrument specific
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="performance_stats"
+    )
+    scrimmage = models.ForeignKey(
+        Scrimmage, on_delete=models.CASCADE, related_name="stats"
+    )
+    metrics = models.JSONField(default=dict, blank=True)
     note = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ["-created_at"]
         unique_together = [("user", "scrimmage")]
+
+    def __str__(self) -> str:
+        return f"Stats for {self.user} – {self.scrimmage}"

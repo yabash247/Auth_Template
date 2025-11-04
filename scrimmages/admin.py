@@ -1,59 +1,58 @@
 # scrimmages/admin.py
 from django.contrib import admin
-from .models import Scrimmage, ScrimmageParticipation, League, LeagueTeam, PerformanceStat
+from .models import (
+    Scrimmage,
+    ScrimmageRSVP,
+    ScrimmageCategory,
+    ScrimmageType,
+    ScrimmageTemplate,
+    RecurrenceRule,
+    PerformanceStat,
+)
 
+# Inline participation display
 class ScrimmageParticipationInline(admin.TabularInline):
-    model = ScrimmageParticipation
+    model = ScrimmageRSVP
     extra = 0
 
 
-# scrimmages/admin.py
-from django.contrib import admin
-from .models import ScrimmageCategory, ScrimmageType, Scrimmage, ScrimmageTemplate, RecurrenceRule
-
 @admin.register(ScrimmageCategory)
 class ScrimmageCategoryAdmin(admin.ModelAdmin):
-    list_display = ("name", "slug")
+    list_display = ("name",)
     search_fields = ("name",)
 
 
 @admin.register(ScrimmageType)
 class ScrimmageTypeAdmin(admin.ModelAdmin):
-    list_display = ("name", "category", "slug")
+    list_display = ("name", "category")
     search_fields = ("name", "category__name")
-    readonly_fields = ("slug",)
     fieldsets = (
         (None, {"fields": ("category", "name", "custom_field_schema")}),
     )
 
 
-from django.contrib import admin
-from .models import Scrimmage, League
-#from .inlines import ScrimmageParticipationInline  # if you use this inline
-
 @admin.register(Scrimmage)
 class ScrimmageAdmin(admin.ModelAdmin):
-    list_display = ("title", "category", "start_time", "visibility", "status", "creator")
-    list_filter = ("category", "visibility", "status", "start_time", "scrimmage_type")
+    list_display = ("title", "category", "visibility", "status")
+    list_filter = ("category", "visibility", "status", "scrimmage_type")
     search_fields = ("title", "description", "address", "scrimmage_type__name")
-    readonly_fields = ("slug", "created_at", "updated_at")
+    readonly_fields = ("created_at", "updated_at")
     inlines = [ScrimmageParticipationInline]
-    prepopulated_fields = {"slug": ("title",)}
 
     fieldsets = (
         ("General", {
             "fields": (
-                "creator", "title", "description", "scrimmage_type", "custom_fields"
+                "title", "description", "scrimmage_type"
             )
         }),
         ("Location & Timing", {
             "fields": (
-                "location", "location_name", "start_time", "end_time"
+                "location","start_datetime", "end_datetime"
             )
         }),
         ("Financials", {
             "fields": (
-                "entry_fee", "currency", "organizer_fee_percent", "prize_pool_amount"
+                "entry_fee", "currency"
             )
         }),
         ("Meta", {
@@ -63,25 +62,16 @@ class ScrimmageAdmin(admin.ModelAdmin):
         }),
     )
 
-
-class ScrimmageParticipationInline(admin.TabularInline):
-    model = ScrimmageParticipation
-    extra = 1
-
-
-@admin.register(League)
-class LeagueAdmin(admin.ModelAdmin):
-    list_display = ("name", "category", "start_date", "end_date", "is_active", "organizer")
-    list_filter = ("category", "is_active", "start_date")
-    search_fields = ("name", "description", "rules")
-    prepopulated_fields = {"slug": ("name",)}
-
+    def save_model(self, request, obj, form, change):
+        if not obj.host_id:
+            obj.host = request.user
+        super().save_model(request, obj, form, change)
 
 
 @admin.register(ScrimmageTemplate)
 class ScrimmageTemplateAdmin(admin.ModelAdmin):
-    list_display = ("title", "creator", "is_shared", "created_at")
-    search_fields = ("title", "creator__email")
+    list_display = ("title", "is_shared", "created_at")
+    search_fields = ("title",)
     list_filter = ("is_shared",)
 
 
@@ -90,19 +80,7 @@ class RecurrenceRuleAdmin(admin.ModelAdmin):
     list_display = ("scrimmage", "frequency", "interval", "active")
 
 
-
-
-
-
-
-@admin.register(LeagueTeam)
-class LeagueTeamAdmin(admin.ModelAdmin):
-    list_display = ("name", "league", "wins", "losses", "draws", "points")
-    list_filter = ("league",)
-
 @admin.register(PerformanceStat)
 class PerformanceStatAdmin(admin.ModelAdmin):
     list_display = ("user", "scrimmage", "created_at")
     search_fields = ("user__email", "scrimmage__title")
-
-

@@ -1,254 +1,287 @@
-# scrimmages/views.py
-from django.db.models import Q
-from django.utils import timezone
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated, AllowAny
+from django.utils import timezone
+from django.db.models import Q
 
-from .models import Scrimmage, ScrimmageParticipation, League, LeagueTeam, PerformanceStat
-from .serializers import (
-    ScrimmageSerializer, ScrimmageParticipationSerializer,
-    LeagueSerializer, LeagueTeamSerializer, PerformanceStatSerializer
+from .models import (
+    Scrimmage,
+    ScrimmageCategory,
+    ScrimmageType,
+    ScrimmageRSVP,
+    ScrimmageMedia,
+    RecurrenceRule,
+    ScrimmageTemplate,
+    PerformanceStat,
 )
-from .permissions import IsOwnerOrReadOnly
+from .serializers import (
+    ScrimmageSerializer,
+    ScrimmageCategorySerializer,
+    ScrimmageTypeSerializer,
+    ScrimmageRSVPSerializer,
+    ScrimmageMediaSerializer,
+    RecurrenceRuleSerializer,
+    ScrimmageTemplateSerializer,
+    PerformanceStatSerializer,
+)
+from .permissions import (
+    ScrimmagePermission,
+    RSVPWritePermission,
+    MediaUploadPermission,
+    CategoryTypePermission,
+    TemplatePermission,
+    IsHostOrAdmin,
+)
+from .validators import (
+    validate_scrimmage_dates,
+    validate_media_upload,
+    validate_rsvp_data,
+    promote_next_waitlisted,
+)
 
 
-class ScrimmageViewSet(viewsets.ModelViewSet):
-    queryset = Scrimmage.objects.select_related("creator", "group")
-    serializer_class = ScrimmageSerializer
+# ============================================================
+# ✅ Category & Type ViewSets
+# ============================================================
 
-    def get_permissions(self):
-        if self.action in ["list", "retrieve", "upcoming"]:
-            return [AllowAny()]
-        if self.action in ["create"]:
-            return [IsAuthenticated()]
-        return [IsOwnerOrReadOnly()]
-    
-    def perform_create(self, serializer):
-        """
-        Automatically assign the logged-in user as the creator of the scrimmage.
-        """
-        serializer.save(creator=self.request.user)
-
+class ScrimmageCategoryViewSet(viewsets.ModelViewSet):
+    queryset = ScrimmageCategory.objects.all()
+    serializer_class = ScrimmageCategorySerializer
+    permission_classes = [CategoryTypePermission]
 
     def get_queryset(self):
-        qs = super().get_queryset()
-        if not self.request.user.is_authenticated:
-            qs = qs.filter(visibility="public", status="published")
-        # simple filters
-        category = self.request.query_params.get("category")
-        upcoming = self.request.query_params.get("upcoming")
-        if category:
-            qs = qs.filter(category=category)
-        if upcoming == "true":
-            qs = qs.filter(end_time__gte=timezone.now())
-        return qs
+        user = self.request.user
+        if not user.is_authenticated:
+            return self.queryset.filter(approved=True)
+        return self.queryset.filter(Q(approved=True) | Q(created_by=user))
 
-    @action(detail=False, methods=["get"], permission_classes=[IsAuthenticated])
-    def my(self, request):
-        qs = Scrimmage.objects.filter(
-            Q(creator=request.user) | Q(participants__user=request.user)
-        ).distinct().order_by("start_time")
-        return Response(self.get_serializer(qs, many=True).data)
 
-    @action(detail=False, methods=["get"], permission_classes=[AllowAny])
-    def upcoming(self, request):
-        qs = Scrimmage.objects.filter(visibility="public", status="published", end_time__gte=timezone.now()).order_by("start_time")
-        return Response(self.get_serializer(qs, many=True).data)
+class ScrimmageTypeViewSet(viewsets.ModelViewSet):
+    queryset = ScrimmageType.objects.all()
+    serializer_class = ScrimmageTypeSerializer
+    permission_classes = [CategoryTypePermission]
 
-    # ---- roster actions ----
-    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
-    def join(self, request, pk=None):
+    def get_queryset(self):
+        user = self.request.user
+        if not user.is_authenticated:
+            return self.queryset.filter(approved=True)
+        return self.queryset.filter(Q(approved=True) | Q(created_by=user))
+
+
+# ============================================================
+# ✅ Scrimmage ViewSet
+# ============================================================
+
+class ScrimmageViewSet(viewsets.ModelViewSet):
+    queryset = Scrimmage.objects.select_related("category", "scrimmage_type", "host")
+    serializer_class = ScrimmageSerializer
+    permission_classes = [ScrimmagePermission]
+
+    def get_queryset(self):
+        user = self.request.user
+        now = timezone.now()
+        qs = self.queryset
+
+        # Public for everyone
+        if not user.is_authenticated:
+            return qs.filter(visibility="public", status__in=["upcoming", "ongoing"])
+
+        # Authenticated users: show public + their group/league/private
+        return qs.filter(
+            Q(visibility="public")
+            | Q(host=user)
+            | Q(rsvps__user=user)
+            | Q(group__members__user=user)
+            | Q(league__members__user=user)
+        ).distinct()
+
+    def perform_create(self, serializer):
+        """Create scrimmage and enforce credit/payment rules."""
+        user = self.request.user
+        start = self.request.data.get("start_datetime")
+        end = self.request.data.get("end_datetime")
+        entry_fee = float(self.request.data.get("entry_fee", 0))
+
+        # Validate time
+        if start and end:
+            validate_scrimmage_dates(serializer.validated_data["start_datetime"],
+                                     serializer.validated_data["end_datetime"])
+
+        # Handle credits
+        credit_required = False
+        if entry_fee > 0:
+            try:
+                from payments.models import CreditWallet
+                wallet = CreditWallet.objects.get(user=user)
+                if wallet.balance < entry_fee:
+                    credit_required = True
+            except Exception:
+                credit_required = True
+
+        scrimmage = serializer.save(host=user, credit_required=credit_required)
+        return scrimmage
+
+    # ----------------------------
+    # Custom Actions
+    # ----------------------------
+
+    @action(detail=True, methods=["post"], permission_classes=[RSVPWritePermission])
+    def rsvp(self, request, pk=None):
+        """RSVP or update attendance."""
         scrim = self.get_object()
-        # basic capacity guard
-        confirmed = scrim.participants.filter(status__in=["confirmed", "checked_in"]).count()
-        if scrim.max_participants and confirmed >= scrim.max_participants:
-            return Response({"detail": "Scrimmage is full."}, status=400)
-        part, _ = ScrimmageParticipation.objects.get_or_create(
-            user=request.user, scrimmage=scrim, defaults={"status": "confirmed"}
-        )
-        if part.status == "declined":
-            part.status = "confirmed"
-            part.save(update_fields=["status"])
-        return Response(ScrimmageParticipationSerializer(part).data)
+        user = request.user
+        data = request.data.copy()
+        data["scrimmage"] = scrim.id
+        data["user"] = user.id
+        validate_rsvp_data(data)
 
-    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
-    def leave(self, request, pk=None):
-        scrim = self.get_object()
-        ScrimmageParticipation.objects.filter(user=request.user, scrimmage=scrim).delete()
-        return Response({"detail": "Left scrimmage."})
+        rsvp, created = ScrimmageRSVP.objects.get_or_create(scrimmage=scrim, user=user)
+        serializer = ScrimmageRSVPSerializer(rsvp, data=data, partial=True, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
 
-    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
-    def invite(self, request, pk=None):
-        """
-        Invite specific user_id to private scrimmage (owner/staff only).
-        """
-        scrim = self.get_object()
-        if not (request.user == scrim.creator or request.user.is_staff):
-            return Response({"detail": "Only the creator can invite."}, status=403)
-        user_id = request.data.get("user_id")
-        if not user_id:
-            return Response({"detail": "user_id required."}, status=400)
-        from django.contrib.auth import get_user_model
-        User = get_user_model()
-        target = User.objects.filter(id=user_id).first()
-        if not target:
-            return Response({"detail": "User not found."}, status=404)
-        inv, _ = ScrimmageParticipation.objects.get_or_create(
-            user=target, scrimmage=scrim, defaults={"status": "invited"}
-        )
-        return Response({"detail": f"Invited {target.email}."})
+        # Waitlist handling
+        if scrim.spots_left <= 0 and scrim.waitlist_enabled and serializer.instance.status == "going":
+            serializer.instance.status = "waitlisted"
+            serializer.instance.save(update_fields=["status"])
 
-    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
-    def checkin(self, request, pk=None):
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["get"], permission_classes=[AllowAny])
+    def rsvps(self, request, pk=None):
         scrim = self.get_object()
-        part = ScrimmageParticipation.objects.filter(user=request.user, scrimmage=scrim).first()
-        if not part:
-            return Response({"detail": "You are not on this roster."}, status=404)
-        part.status = "checked_in"
-        part.save(update_fields=["status"])
-        return Response({"detail": "Checked in."})
-    
-    @action(detail=True, methods=["post"])
+        rsvps = scrim.rsvps.all().select_related("user")
+        return Response(ScrimmageRSVPSerializer(rsvps, many=True).data)
+
+    @action(detail=True, methods=["post"], permission_classes=[RSVPWritePermission])
+    def feedback(self, request, pk=None):
+        """Submit feedback and rating."""
+        scrim = self.get_object()
+        rsvp = ScrimmageRSVP.objects.filter(scrimmage=scrim, user=request.user).first()
+        if not rsvp:
+            return Response({"detail": "You have not RSVP'd for this scrimmage."}, status=400)
+
+        rating = request.data.get("rating")
+        feedback = request.data.get("feedback")
+        validate_rsvp_data({"rating": rating})
+
+        rsvp.rating = rating
+        rsvp.feedback = feedback
+        rsvp.save(update_fields=["rating", "feedback"])
+
+        # Update scrimmage rating average
+        ratings = scrim.rsvps.filter(rating__isnull=False).values_list("rating", flat=True)
+        if ratings:
+            scrim.rating_count = len(ratings)
+            scrim.rating_avg = sum(ratings) / scrim.rating_count
+            scrim.save(update_fields=["rating_avg", "rating_count"])
+
+        return Response({"success": "Feedback submitted."})
+
+    @action(detail=True, methods=["get"], permission_classes=[AllowAny])
+    def media(self, request, pk=None):
+        """Get all media for this scrimmage."""
+        scrim = self.get_object()
+        media = scrim.media_files.filter(approved=True)
+        return Response(ScrimmageMediaSerializer(media, many=True).data)
+
+    @action(detail=True, methods=["post"], permission_classes=[MediaUploadPermission])
+    def upload_media(self, request, pk=None):
+        """Upload new media with file size validation."""
+        scrim = self.get_object()
+        user = request.user
+        file_size = int(request.data.get("file_size", 0))
+
+        validate_media_upload(user, scrim, file_size)
+        serializer = ScrimmageMediaSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        serializer.save(scrimmage=scrim)
+
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], permission_classes=[IsHostOrAdmin])
     def cancel(self, request, pk=None):
+        """Cancel scrimmage and trigger refunds if applicable."""
         scrim = self.get_object()
         scrim.status = "cancelled"
         scrim.save(update_fields=["status"])
-        results = bulk_refund("scrimmage", scrim.id)
-        return Response({"detail": "Scrimmage cancelled, refunds processed.", "results": results})
-    
-    # ========== TEMPLATE ACTIONS ==========
 
-    @action(detail=False, methods=["post"], permission_classes=[IsAuthenticated])
-    def create_from_template(self, request):
-        """
-        Clone a saved scrimmage template to a new scrimmage instance.
-        """
-        from .models import ScrimmageTemplate
-        template_id = request.data.get("template_id")
-        start_time = request.data.get("start_time")
+        # Auto refunds via signal (if payments integrated)
+        return Response({"success": f"Scrimmage '{scrim.title}' cancelled."})
+
+    @action(detail=True, methods=["post"], permission_classes=[IsHostOrAdmin])
+    def check_in(self, request, pk=None):
+        """Host marks participant as checked in."""
+        scrim = self.get_object()
+        user_id = request.data.get("user_id")
+        if not user_id:
+            return Response({"error": "user_id is required."}, status=400)
 
         try:
-            template = ScrimmageTemplate.objects.get(pk=template_id, creator=request.user)
-        except ScrimmageTemplate.DoesNotExist:
-            return Response({"detail": "Template not found."}, status=404)
+            rsvp = ScrimmageRSVP.objects.get(scrimmage=scrim, user_id=user_id)
+        except ScrimmageRSVP.DoesNotExist:
+            return Response({"error": "RSVP not found."}, status=404)
 
-        data = template.base_settings.copy()
-        if start_time:
-            data["start_time"] = start_time
-        data["creator"] = request.user.id
-
-        serializer = ScrimmageSerializer(data=data)
-        serializer.is_valid(raise_exception=True)
-        scrimmage = serializer.save()
-
-        return Response(ScrimmageSerializer(scrimmage).data, status=201)
+        rsvp.status = "checked_in"
+        rsvp.checked_in_at = timezone.now()
+        rsvp.save(update_fields=["status", "checked_in_at"])
+        return Response({"success": f"{rsvp.user} checked in."})
 
 
-# ========== RECURRENCE RULE ==========
+# ============================================================
+# ✅ Media ViewSet
+# ============================================================
 
-    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
-    def set_recurrence(self, request, pk=None):
-        """
-        Define recurrence for a scrimmage (weekly/monthly pattern).
-        """
-        from .models import RecurrenceRule
-        from .serializers import RecurrenceRuleSerializer
+class ScrimmageMediaViewSet(viewsets.ModelViewSet):
+    queryset = ScrimmageMedia.objects.select_related("scrimmage", "uploader")
+    serializer_class = ScrimmageMediaSerializer
+    permission_classes = [MediaUploadPermission]
 
-        scrimmage = self.get_object()
-        serializer = RecurrenceRuleSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        rule = serializer.save(scrimmage=scrimmage)
-        return Response(RecurrenceRuleSerializer(rule).data, status=201)
+    def perform_create(self, serializer):
+        serializer.save(uploader=self.request.user)
 
 
-# ========== INTEREST-BASED AUTO-INVITES ==========
+# ============================================================
+# ✅ Template ViewSet
+# ============================================================
 
-    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
-    def auto_invite(self, request, pk=None):
-        """
-        Automatically invite users whose interests match this scrimmage’s type or category.
-        """
-        from users.models import UserInterest
-        from notifications.utils import notify_admins
-        scrimmage = self.get_object()
-        scrimmage_type_slug = scrimmage.scrimmage_type.slug
-
-        matching_users = UserInterest.objects.filter(
-            Q(types__icontains=scrimmage_type_slug)
-            | Q(categories__icontains=scrimmage.scrimmage_type.category.slug),
-            status="active"
-        ).select_related("user")
-
-        invited = 0
-        for ui in matching_users:
-            exists = scrimmage.participants.filter(user=ui.user).exists()
-            if not exists:
-                scrimmage.participants.create(user=ui.user, role="player", status="invited")
-                invited += 1
-
-        notify_admins(
-            title="Scrimmage Auto-Invites Sent",
-            body=f"{invited} users were auto-invited to {scrimmage.title}."
-        )
-
-        return Response({"message": f"Auto-invited {invited} users."}, status=200)
-
-
-
-class LeagueViewSet(viewsets.ModelViewSet):
-    queryset = League.objects.select_related("organizer", "group")
-    serializer_class = LeagueSerializer
-
-    def get_permissions(self):
-        if self.action in ["list", "retrieve"]:
-            return [AllowAny()]
-        if self.action in ["create"]:
-            return [IsAuthenticated()]
-        return [IsOwnerOrReadOnly()]
+class ScrimmageTemplateViewSet(viewsets.ModelViewSet):
+    queryset = ScrimmageTemplate.objects.all()
+    serializer_class = ScrimmageTemplateSerializer
+    permission_classes = [TemplatePermission]
 
     def get_queryset(self):
-        qs = super().get_queryset()
-        if not self.request.user.is_authenticated:
-            qs = qs.filter(is_active=True)
-        return qs
+        user = self.request.user
+        if not user.is_authenticated:
+            return self.queryset.filter(is_public=True, approved=True)
+        return self.queryset.filter(Q(is_public=True) | Q(creator=user)).distinct()
 
-    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
-    def add_team(self, request, pk=None):
-        print("\n⚙️ [DEBUG] add_team called for league:", pk)
-
-        league = self.get_object()
-        print("✅ [DEBUG] League object retrieved:", league)
-
-        serializer = LeagueTeamSerializer(data=request.data, context={"request": request})
-        print("📦 [DEBUG] Incoming data:", request.data)
-
-        if not serializer.is_valid():
-            print("❌ [DEBUG] Validation errors:", serializer.errors)
-            return Response(serializer.errors, status=400)
-
-        print("✅ [DEBUG] Serializer validated successfully.")
-        team = serializer.save(league=league)
-        print("🎯 [DEBUG] Team saved successfully:", team)
-
-        response_data = LeagueTeamSerializer(team).data
-        print("📤 [DEBUG] Returning response:", response_data)
-
-        return Response(response_data, status=201)
+    def perform_create(self, serializer):
+        serializer.save(creator=self.request.user)
 
 
+# ============================================================
+# ✅ Recurrence Rule ViewSet
+# ============================================================
 
+class RecurrenceRuleViewSet(viewsets.ModelViewSet):
+    queryset = RecurrenceRule.objects.select_related("scrimmage")
+    serializer_class = RecurrenceRuleSerializer
+    permission_classes = [IsAuthenticated]
+
+    def perform_create(self, serializer):
+        serializer.save()
+
+
+# ============================================================
+# ✅ Performance Stats ViewSet
+# ============================================================
 
 class PerformanceStatViewSet(viewsets.ModelViewSet):
+    queryset = PerformanceStat.objects.select_related("scrimmage", "user")
     serializer_class = PerformanceStatSerializer
-
-    def get_queryset(self):
-        qs = PerformanceStat.objects.select_related("user", "scrimmage")
-        user = self.request.user
-        if user.is_staff:
-            return qs
-        return qs.filter(user=user)
+    permission_classes = [IsAuthenticated]
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
