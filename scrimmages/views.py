@@ -93,7 +93,7 @@ class ScrimmageViewSet(viewsets.ModelViewSet):
             | Q(host=user)
             | Q(rsvps__user=user)
             | Q(group__members__user=user)
-            | Q(league__members__user=user)
+            #| Q(league__members__user=user)
         ).distinct()
 
     def perform_create(self, serializer):

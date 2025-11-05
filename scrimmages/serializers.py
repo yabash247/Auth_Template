@@ -226,7 +226,7 @@ class ScrimmageSerializer(serializers.ModelSerializer):
             "scrimmage_type",
             "scrimmage_type_id",
             "visibility",
-            "location_name",
+            #"location_name",
             "address",
             "latitude",
             "longitude",
