@@ -4,11 +4,17 @@ from django.conf import settings
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models
 from django.db.models import Q
-from django.utils import timezone
+from django.core.exceptions import ValidationError
 
 User = settings.AUTH_USER_MODEL
 
+from django.contrib.contenttypes.fields import GenericRelation
+from media.models import MediaRelation
+media_relations = GenericRelation(MediaRelation)
+
 from organizations.models import Location  # 👈 add this import at the top
+
+
 
 
 # ============================================================
@@ -198,6 +204,13 @@ class Scrimmage(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    media_relations = GenericRelation(
+        MediaRelation, 
+        related_query_name='scrimmage',
+        content_type_field="content_type",
+        object_id_field="object_id"
+    )
+
     class Meta:
         ordering = ["start_datetime"]
         indexes = [
@@ -210,18 +223,27 @@ class Scrimmage(models.Model):
         return f"{self.title} ({self.status})"
 
     def clean(self):
-        from django.core.exceptions import ValidationError
-
         # Only check if both dates are provided
-        if self.start_datetime and self.end_datetime:
-            if self.end_datetime <= self.start_datetime:
-                raise ValidationError("End time must be after start time.")
-
+        if self.start_datetime and self.end_datetime and self.end_datetime <= self.start_datetime:
+            raise ValidationError("End time must be after start time.")
 
     def save(self, *args, **kwargs):
         self.is_paid = (self.entry_fee or 0) > 0
         super().save(*args, **kwargs)
 
+    def get_media_by_context(self, context_name: str):
+        """
+        Retrieve approved media for this scrimmage filtered by placement context.
+        Example: scrimmage.get_media_by_context('icon')
+        """
+        return self.media_relations.filter(
+            app_name="scrimmages",
+            model_name="scrimmage",
+            context_name=context_name,
+            approved=True,
+        ).select_related("media")
+
+    # 🟨 REORDERED for clarity (spots_taken and spots_left grouped last)
     @property
     def spots_taken(self) -> int:
         return self.rsvps.filter(

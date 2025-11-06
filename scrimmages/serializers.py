@@ -12,8 +12,8 @@ from .models import (
     PerformanceStat,
 )
 
-from media.models import Media
 
+from media.models import Media, MediaRelation
 
 # ============================================================
 # ✅ Category & Type Serializers
@@ -97,35 +97,36 @@ class ScrimmageRSVPSerializer(serializers.ModelSerializer):
 # ✅ Scrimmage Media Serializer (with upload moderation)
 # ============================================================
 class ScrimmageMediaSerializer(serializers.ModelSerializer):
-    uploader = serializers.StringRelatedField(read_only=True)
-    media_id = serializers.PrimaryKeyRelatedField(
-        source="media",
-        queryset=[],  # set in __init__ dynamically if media model imported
-        write_only=True,
-    )
+    media = serializers.PrimaryKeyRelatedField(queryset=Media.objects.all())
+    file_url = serializers.SerializerMethodField()
+    context_name = serializers.CharField(read_only=True)
+    caption = serializers.CharField(required=False, allow_blank=True)
 
     class Meta:
-        model = ScrimmageMedia
+        model = MediaRelation
         fields = [
             "id",
-            "scrimmage",
-            "uploader",
-            "media_id",
+            "app_name",
+            "model_name",
+            "object_id",
+            "context_name",
+            "media",
+            "file_url",
             "caption",
             "approved",
             "file_size",
-            "created_at",
+            "uploaded_at",
         ]
-        read_only_fields = ["uploader", "approved", "created_at"]
+        read_only_fields = ["app_name", "model_name", "uploaded_at", "file_url"]
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        # Late import to avoid circular dependency with media app
-        from media.models import Media
-        self.fields["media_id"].queryset = Media.objects.all()
+    def get_file_url(self, obj):
+        return obj.media.file.url if obj.media and obj.media.file else None
 
     def create(self, validated_data):
-        validated_data["uploader"] = self.context["request"].user
+        """Ensure app/model linkage and uploader context automatically."""
+        request = self.context.get("request")
+        validated_data["app_name"] = "scrimmages"
+        validated_data["model_name"] = "scrimmage"
         return super().create(validated_data)
 
 
@@ -206,7 +207,9 @@ class ScrimmageSerializer(serializers.ModelSerializer):
     )
 
     rsvps = ScrimmageRSVPSerializer(many=True, read_only=True)
-    media_files = ScrimmageMediaSerializer(many=True, read_only=True)
+    media_relations = ScrimmageMediaSerializer(
+        source="media_relations.all", many=True, read_only=True
+    )
     recurrence_rule = RecurrenceRuleSerializer(read_only=True)
 
     spots_left = serializers.IntegerField(read_only=True)
@@ -248,6 +251,8 @@ class ScrimmageSerializer(serializers.ModelSerializer):
             "spots_taken",
             "rsvps",
             "media_files",
+            "recurrence_rule",
+            "media_relations",
             "recurrence_rule",
         ]
         read_only_fields = [
