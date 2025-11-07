@@ -2,8 +2,10 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.exceptions import ValidationError
 from django.utils import timezone
 from django.db.models import Q
+from decimal import Decimal
 
 from .models import (
     Scrimmage,
@@ -123,7 +125,7 @@ class ScrimmageViewSet(viewsets.ModelViewSet):
         return scrimmage
 
     # ----------------------------
-    # Custom Actions
+    # RSVP Flow (Safe Payment Logic)
     # ----------------------------
 
     @action(detail=True, methods=["post"], permission_classes=[RSVPWritePermission])
@@ -136,12 +138,59 @@ class ScrimmageViewSet(viewsets.ModelViewSet):
         data["user"] = user.id
         validate_rsvp_data(data)
 
+        # Determine payment method (default to tentative) and compute initial RSVP status
+        payment_method = data.get("payment_method", "tentative") or "tentative"
+
+        # Default status
+        desired_status = data.get("status")  # allow explicit status override
+
+        # If the scrimmage has an entry fee, determine status based on payment method
+        if scrim.entry_fee and Decimal(scrim.entry_fee) > 0:
+            if payment_method == "online":
+                if not data.get("confirmed_payment_intent"):
+                    raise ValidationError("Payment must be confirmed by user before charging.")
+                # Attempt auto payment if payments module available
+                try:
+                    from payments.utils import process_auto_payment  # type: ignore
+                    result = process_auto_payment(
+                        user=user,
+                        amount=Decimal(scrim.entry_fee),
+                        app_source="scrimmage",
+                        related_id=scrim.id,
+                        description=f"Entry fee for scrimmage '{scrim.title}'",
+                    )
+                    status_result = result.get("status")
+                    if status_result == "paid":
+                        desired_status = "going"
+                    elif status_result == "pending":
+                        desired_status = "pending_payment"
+                    else:
+                        return Response({"error": "Payment could not be processed."}, status=400)
+                except Exception:
+                    # Fallback: mark as pending payment until confirmed by organizer
+                    desired_status = "pending_payment"
+            elif payment_method in ["cash", "transfer"]:
+                desired_status = "pending_payment"
+            else:
+                # Tentative selection means interest only
+                desired_status = "interested"
+        else:
+            # Free scrimmage: going unless user explicitly chooses tentative
+            if payment_method in ["cash", "transfer", "online"]:
+                desired_status = "going"
+            else:
+                desired_status = "going" if payment_method != "tentative" else "interested"
+
+        if desired_status:
+            data["status"] = desired_status
+
+        # Upsert RSVP
         rsvp, created = ScrimmageRSVP.objects.get_or_create(scrimmage=scrim, user=user)
         serializer = ScrimmageRSVPSerializer(rsvp, data=data, partial=True, context={"request": request})
         serializer.is_valid(raise_exception=True)
         serializer.save()
 
-        # Waitlist handling
+        # Waitlist handling: demote to waitlist if confirmed going but no spots left
         if scrim.spots_left <= 0 and scrim.waitlist_enabled and serializer.instance.status == "going":
             serializer.instance.status = "waitlisted"
             serializer.instance.save(update_fields=["status"])
@@ -285,3 +334,127 @@ class PerformanceStatViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
+
+
+
+
+
+
+# SCRIMMAGE WORKFLOW OVERVIEW
+
+'''
+
+ ┌────────────────────────────────────────┐
+ │        SCRIMMAGE CREATION FLOW         │
+ └────────────────────────────────────────┘
+          │
+          ▼
+ ┌──────────────────────────────────────┐
+ │ Host creates Scrimmage               │
+ │ - Sets entry_fee                     │
+ │ - Defines payment_options            │
+ │   (online / cash / transfer / tentative) │
+ └──────────────────────────────────────┘
+          │
+          ▼
+ ┌──────────────────────────────────────┐
+ │ Scrimmage saved in DB                │
+ │ → Signals create calendar + notify   │
+ │ → CreditRequired = True if wallet < fee │
+ └──────────────────────────────────────┘
+          │
+          ▼
+   Users browse and RSVP
+
+─────────────────────────────────────────────
+           RSVP + PAYMENT DECISION
+─────────────────────────────────────────────
+          │
+          ▼
+ ┌────────────────────────────────────────┐
+ │ User submits RSVP                      │
+ │ (selects payment_method)               │
+ └────────────────────────────────────────┘
+          │
+          ▼
+ ┌────────────────────────────────────────────┐
+ │ Backend logic (views.py)                   │
+ │ - Checks scrimmage.entry_fee               │
+ │ - If free → status = "going"               │
+ │ - If paid + method:                        │
+ │    • online   → process_auto_payment()     │
+ │    • cash/transfer → pending_payment       │
+ │    • tentative     → interested            │
+ └────────────────────────────────────────────┘
+          │
+          ▼
+ ┌────────────────────────────────────────────┐
+ │ process_auto_payment (payments/utils.py)   │
+ │ - Checks CreditWallet balance              │
+ │ - If balance ≥ amount → deduct + mark paid │
+ │ - Else → create PaymentTransaction (pending)│
+ │ - Sends Notification                       │
+ └────────────────────────────────────────────┘
+          │
+          ▼
+ ┌────────────────────────────────────────────┐
+ │ RSVP record updated                        │
+ │ - status = going / pending_payment / interested │
+ │ - payment_method saved                     │
+ │ - reminder_sent_at remains null            │
+ └────────────────────────────────────────────┘
+          │
+          ▼
+ ┌────────────────────────────────────────────┐
+ │ Conditional Visibility                     │
+ │ - going/checked_in/completed → full details│
+ │ - pending_payment/waitlisted → only city   │
+ │ - interested/no RSVP → hides address       │
+ └────────────────────────────────────────────┘
+
+─────────────────────────────────────────────
+           EVENT LIFE CYCLE
+─────────────────────────────────────────────
+          │
+          ▼
+ ┌────────────────────────────────────────────┐
+ │ Organizer confirms cash payments           │
+ │ - Updates RSVP → status = "going"          │
+ │ - Payment model (optional) updated         │
+ └────────────────────────────────────────────┘
+          │
+          ▼
+ ┌────────────────────────────────────────────┐
+ │ Waitlist Automation                        │
+ │ - promote_next_waitlisted() runs            │
+ │ - fills freed spots automatically          │
+ └────────────────────────────────────────────┘
+          │
+          ▼
+ ┌────────────────────────────────────────────┐
+ │ Scrimmage starts → check_in()              │
+ │ - Host marks participants as checked_in    │
+ │ - Optional payment validation              │
+ └────────────────────────────────────────────┘
+          │
+          ▼
+ ┌────────────────────────────────────────────┐
+ │ Scrimmage ends → feedback & rating         │
+ │ - RSVP feedback() updates stats            │
+ │ - Notifications trigger                   │
+ └────────────────────────────────────────────┘
+
+─────────────────────────────────────────────
+           POST-EVENT SIGNALS
+─────────────────────────────────────────────
+          │
+          ▼
+ ┌────────────────────────────────────────────┐
+ │ signals.py (post_save)                     │
+ │ - Add to user calendar (if "going")        │
+ │ - Notify user or group                     │
+ │ - Refund via Payment if cancelled          │
+ └────────────────────────────────────────────┘
+
+
+'''

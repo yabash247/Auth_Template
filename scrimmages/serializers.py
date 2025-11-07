@@ -71,6 +71,21 @@ class ScrimmageRSVPSerializer(serializers.ModelSerializer):
     user = serializers.StringRelatedField(read_only=True)
     scrimmage = serializers.PrimaryKeyRelatedField(read_only=True)
 
+    # ✅ NEW: expose payment_method for attendee selection
+    payment_method = serializers.ChoiceField(
+        choices=[
+            ("online", "Online"),
+            ("cash", "Cash on Event Day"),
+            ("transfer", "Zelle / Bank Transfer"),
+            ("tentative", "Tentative RSVP"),
+        ],
+        required=False,
+        default="tentative",
+    )
+
+    # ✅ NEW: expose reminder_sent_at for read-only (automation can update)
+    reminder_sent_at = serializers.DateTimeField(read_only=True)
+
     class Meta:
         model = ScrimmageRSVP
         fields = [
@@ -78,11 +93,13 @@ class ScrimmageRSVPSerializer(serializers.ModelSerializer):
             "scrimmage",
             "user",
             "status",
+             "payment_method",
             "role",
             "team_name",
             "score",
             "feedback",
             "rating",
+            "reminder_sent_at",
             "checked_in_at",
             "created_at",
         ]
@@ -240,6 +257,7 @@ class ScrimmageSerializer(serializers.ModelSerializer):
             "entry_fee",
             "currency",
             "credit_required",
+            "payment_options",
             "is_paid",
             "teams",
             "status",
@@ -268,6 +286,44 @@ class ScrimmageSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         validated_data["host"] = self.context["request"].user
         return super().create(validated_data)
+    
+    # ✅ Conditional visibility: hide or mask location details based on RSVP status
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get("request")
+        user = getattr(request, "user", None) if request else None
+
+        # Hide location details for anonymous users
+        if not user or not getattr(user, "is_authenticated", False):
+            data.pop("latitude", None)
+            data.pop("longitude", None)
+            # show only broad address (city/state) if available
+            if data.get("address"):
+                parts = data["address"].split(",")
+                data["address"] = parts[-1].strip() if parts else data["address"]
+            return data
+
+        # Determine this user's RSVP status if any
+        rsvp = instance.rsvps.filter(user=user).first()
+        if rsvp:
+            status = rsvp.status
+        else:
+            status = None
+
+        # If pending payment or waitlisted: mask precise location
+        if status in ["pending_payment", "waitlisted"]:
+            data.pop("latitude", None)
+            data.pop("longitude", None)
+            if data.get("address"):
+                parts = data["address"].split(",")
+                data["address"] = parts[-1].strip() if parts else data["address"]
+        # If no RSVP or interested: hide entire address and coordinates
+        elif not status or status == "interested":
+            data.pop("address", None)
+            data.pop("latitude", None)
+            data.pop("longitude", None)
+
+        return data
 
 
 # ============================================================

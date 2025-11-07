@@ -22,6 +22,23 @@ class ScrimmageParticipationInline(admin.TabularInline):
     model = ScrimmageRSVP
     extra = 0
 
+     # Show payment & reminder fields inline
+    list_display = ("user", "status", "payment_method", "reminder_sent_at")
+    readonly_fields = ("created_at", "checked_in_at", "reminder_sent_at")
+    fields = (
+            "user",
+            "status",
+            "role",
+            "payment_method",
+            "team_name",
+            "score",
+            "feedback",
+            "rating",
+            "checked_in_at",
+            "reminder_sent_at",
+            "created_at",
+        )
+
 
 # Inline media display
 class MediaRelationInline(GenericTabularInline):
@@ -64,6 +81,10 @@ class ScrimmageAdmin(admin.ModelAdmin):
     readonly_fields = ("created_at", "updated_at")
     inlines = [ScrimmageParticipationInline, MediaRelationInline]
 
+    # ✅ Added: better grouping and payment-related fields
+    list_display_links = ("title",)
+    ordering = ("-start_datetime",)
+
     fieldsets = (
         ("General", {
             "fields": (
@@ -77,7 +98,7 @@ class ScrimmageAdmin(admin.ModelAdmin):
         }),
         ("Financials", {
             "fields": (
-                "entry_fee", "currency"
+                "entry_fee", "currency", "payment_options",
             )
         }),
         ("Meta", {

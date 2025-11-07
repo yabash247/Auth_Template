@@ -47,33 +47,31 @@ class PaymentTransaction(models.Model):
 
 
 class CreditWallet(models.Model):
-    """
-    A simple token-based wallet system for users (like Fortnite V-Bucks).
-    """
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="wallet")
+    """User wallet for both fiat credits and ProjectCoins."""
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="wallet")
     balance = models.DecimalField(max_digits=12, decimal_places=2, default=0)
-    updated_at = models.DateTimeField(auto_now=True)
+    total_spent = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total_earned = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    last_updated = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f"{self.user} - {self.balance:.2f} credits"
 
-    def deposit(self, amount: float, source="topup"):
-        self.balance += amount
-        self.save(update_fields=["balance"])
-        CreditTransaction.objects.create(
-            user=self.user, amount=amount, transaction_type="credit",
-            source=source, balance_after=self.balance
-        )
+    def deposit(self, amount, reason="topup"):
+        from decimal import Decimal
+        self.balance += Decimal(amount)
+        self.total_earned += Decimal(amount)
+        self.save(update_fields=["balance", "total_earned", "last_updated"])
+        return self.balance
 
-    def withdraw(self, amount: float, purpose="purchase"):
-        if self.balance < amount:
-            raise ValueError("Insufficient credits")
-        self.balance -= amount
-        self.save(update_fields=["balance"])
-        CreditTransaction.objects.create(
-            user=self.user, amount=amount, transaction_type="debit",
-            source=purpose, balance_after=self.balance
-        )
+    def spend(self, amount, reason="purchase"):
+        from decimal import Decimal
+        if self.balance < Decimal(amount):
+            raise ValueError("Insufficient credits.")
+        self.balance -= Decimal(amount)
+        self.total_spent += Decimal(amount)
+        self.save(update_fields=["balance", "total_spent", "last_updated"])
+        return self.balance
 
 
 class CreditTransaction(models.Model):
@@ -91,6 +89,30 @@ class CreditTransaction(models.Model):
     def __str__(self):
         return f"{self.user} {self.transaction_type} {self.amount} ({self.source})"
 
+# 🟩 Added
+class CreditWalletTransaction(models.Model):
+    TYPE_CHOICES = [
+        ("deposit", "Deposit"),
+        ("withdrawal", "Withdrawal"),
+    ]
+
+    STATUS_CHOICES = [
+        ("pending", "Pending"),
+        ("succeeded", "Succeeded"),
+        ("failed", "Failed"),
+    ]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="wallet_transactions")
+    wallet = models.ForeignKey("payments.CreditWallet", on_delete=models.CASCADE, related_name="transactions")
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    type = models.CharField(max_length=20, choices=TYPE_CHOICES)
+    provider = models.CharField(max_length=20, choices=[("stripe", "Stripe"), ("paypal", "PayPal")], blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
+    reference = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.user} - {self.type} {self.amount} ({self.status})"
 
 
 class BonusTier(models.Model):
@@ -121,9 +143,6 @@ class OrganizerFee(models.Model):
         return f"{self.organizer} {self.app_source} {self.related_id} +{self.amount} ({self.status})"
 
 
-
-
-
 class CoinPurchase(models.Model):
     """Tracks purchase and conversion rate at time of buying ProjectCoins."""
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="coin_purchases")
@@ -138,28 +157,6 @@ class CoinPurchase(models.Model):
     def __str__(self):
         return f"{self.user.email} bought {self.coin_amount} Coins @ {self.exchange_rate} {self.currency}/coin"
 
-
-class CreditWallet(models.Model):
-    """Existing Wallet upgraded to handle Coins."""
-    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="wallet")
-    balance = models.DecimalField(max_digits=12, decimal_places=2, default=0)  # in Coins
-    total_spent = models.DecimalField(max_digits=12, decimal_places=2, default=0)
-    total_earned = models.DecimalField(max_digits=12, decimal_places=2, default=0)
-    last_updated = models.DateTimeField(auto_now=True)
-
-    def deposit(self, coins, reason="purchase"):
-        self.balance += Decimal(coins)
-        self.total_earned += Decimal(coins)
-        self.save(update_fields=["balance", "total_earned", "last_updated"])
-        return self.balance
-
-    def spend(self, coins, reason="payment"):
-        if self.balance < Decimal(coins):
-            raise ValueError("Insufficient balance")
-        self.balance -= Decimal(coins)
-        self.total_spent += Decimal(coins)
-        self.save(update_fields=["balance", "total_spent", "last_updated"])
-        return self.balance
 
 class PaymentLink(models.Model):
     scrimmage = models.ForeignKey("scrimmages.Scrimmage", on_delete=models.CASCADE, related_name="payment_links")

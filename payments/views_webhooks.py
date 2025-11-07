@@ -11,6 +11,8 @@ from membership.models import Membership, MembershipPlan
 from membership.views import extend_period
 from decimal import Decimal
 
+from payments.utils import add_credits  # 🟩 Add at top
+
 # 🔹 Stripe Webhook
 class StripeWebhookView(APIView):
     permission_classes = [AllowAny]
@@ -49,6 +51,9 @@ class StripeWebhookView(APIView):
                 provider_ref=provider_ref, status="succeeded",
                 processed_at=timezone.now()
             )
+
+            if purpose == "credit_topup":
+                add_credits(user, amount_usd, provider="stripe", reference=provider_ref)
 
             if user and plan:
                 membership = (

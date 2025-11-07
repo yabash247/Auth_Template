@@ -1,5 +1,6 @@
 # payments/views_webhooks_paypal.py
 import json, requests
+from decimal import Decimal
 from django.conf import settings
 from django.utils import timezone
 from rest_framework.views import APIView
@@ -9,6 +10,8 @@ from .models import PaymentTransaction
 from notifications.models import Notification
 from membership.models import Membership, MembershipPlan
 from membership.views import extend_period
+
+from payments.utils import add_credits  # 🟩 Add at top
 
 
 def verify_paypal_signature(request_body, headers):
@@ -63,6 +66,14 @@ class PayPalWebhookView(APIView):
                 provider_ref=provider_ref, status="succeeded",
                 processed_at=timezone.now()
             )
+
+            try:
+                if event_type == "PAYMENT.SALE.COMPLETED" and "credit_topup" in custom_id:
+                    add_credits(user, Decimal(amount), provider="paypal", reference=provider_ref)
+            except Exception as e:
+                # Optional: log error or notify admin if deposit fails
+                print(f"[PayPalWebhook] Wallet top-up failed: {e}")
+
             if user and plan:
                 membership = (
                     Membership.objects.filter(user=user, plan=plan).order_by("-started_at").first()

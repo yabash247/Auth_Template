@@ -4,10 +4,12 @@ from .views_webhooks import StripeWebhookView
 from .views_webhooks_paypal import PayPalWebhookView
 from .views_test_webhook import TestWebhookView
 from .views_transactions import PaymentTransactionViewSet, CreditWalletViewSet, BuyCoinsView
+from .views_history import TransactionHistoryViewSet
 
 router = DefaultRouter()
 router.register(r"transactions", PaymentTransactionViewSet, basename="transactions")
 router.register(r"wallet", CreditWalletViewSet, basename="wallet")
+router.register(r"history", TransactionHistoryViewSet, basename="transaction-history")
 
 urlpatterns = [
     path("webhooks/stripe/", StripeWebhookView.as_view(), name="stripe-webhook"),

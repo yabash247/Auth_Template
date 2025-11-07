@@ -4,6 +4,9 @@ from django.utils import timezone
 from .models import PaymentTransaction, CreditWallet
 from notifications.models import Notification
 
+from payments.models import CreditWalletTransaction
+from django.db import transaction
+
 from django.db import transaction as db_txn
 import stripe
 from django.conf import settings
@@ -289,3 +292,27 @@ def convert_to_fiat(user, coins):
         remaining -= chunk
 
     return total_usd
+
+def add_credits(user, amount: Decimal, provider="stripe", reference=None):
+    """Safely deposit credits into wallet after fiat confirmation."""
+    with transaction.atomic():
+        wallet, _ = CreditWallet.objects.get_or_create(user=user)
+        wallet.deposit(amount, reason="fiat_deposit")
+        CreditWalletTransaction.objects.create(
+            user=user, wallet=wallet, amount=amount, type="deposit",
+            provider=provider, status="succeeded", reference=reference
+        )
+    return {"balance": wallet.balance}
+
+def withdraw_credits(user, amount: Decimal, provider="stripe", reference=None):
+    """Safely withdraw credits and create a pending payout transaction."""
+    wallet = CreditWallet.objects.get(user=user)
+    if wallet.balance < amount:
+        raise ValueError("Insufficient credits to withdraw.")
+    with transaction.atomic():
+        wallet.spend(amount, reason="withdrawal")
+        CreditWalletTransaction.objects.create(
+            user=user, wallet=wallet, amount=amount, type="withdrawal",
+            provider=provider, status="pending", reference=reference
+        )
+    return {"balance": wallet.balance}

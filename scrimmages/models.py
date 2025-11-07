@@ -6,6 +6,13 @@ from django.db import models
 from django.db.models import Q
 from django.core.exceptions import ValidationError
 
+# Optional Postgres field for array of payment options
+try:
+    # ArrayField is available when using PostgreSQL; fallback to JSONField if unavailable
+    from django.contrib.postgres.fields import ArrayField  # type: ignore
+except Exception:
+    ArrayField = None  # type: ignore
+
 User = settings.AUTH_USER_MODEL
 
 from django.contrib.contenttypes.fields import GenericRelation
@@ -190,6 +197,31 @@ class Scrimmage(models.Model):
         default=False, help_text="Derived from entry_fee > 0"
     )
 
+    # ✅ NEW: Organizer-defined payment options
+    # Allow the host to specify which payment methods attendees can choose. Uses ArrayField when available,
+    # otherwise falls back to JSONField. Supported options: online, cash, transfer, tentative.
+    if ArrayField:
+        payment_options = ArrayField(
+            models.CharField(
+                max_length=20,
+                choices=[
+                    ("online", "Online"),
+                    ("cash", "Cash on Event Day"),
+                    ("transfer", "Zelle / Bank Transfer"),
+                    ("tentative", "Tentative RSVP"),
+                ],
+            ),
+            default=list,
+            blank=True,
+            help_text="Available payment methods for this scrimmage.",
+        )
+    else:
+        payment_options = models.JSONField(
+            default=list,
+            blank=True,
+            help_text="Available payment methods for this scrimmage.",
+        )
+
     # Flexible team structure
     # Example: {"Team A": [user_id,...], "Team B": [user_id,...]}
     teams = models.JSONField(default=dict, blank=True)
@@ -299,6 +331,21 @@ class ScrimmageRSVP(models.Model):
 
     checked_in_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    # ✅ NEW: How the attendee plans to pay (mirrors Scrimmage.payment_options)
+    payment_method = models.CharField(
+        max_length=20,
+        choices=[
+            ("online", "Online"),
+            ("cash", "Cash on Event Day"),
+            ("transfer", "Zelle / Bank Transfer"),
+            ("tentative", "Tentative RSVP"),
+        ],
+        default="tentative",
+    )
+
+    # ✅ NEW: Timestamp of last payment reminder sent (for future automation)
+    reminder_sent_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         indexes = [

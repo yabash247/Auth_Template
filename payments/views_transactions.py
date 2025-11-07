@@ -164,6 +164,39 @@ class CreditWalletViewSet(viewsets.ViewSet):
         result = process_topup_with_bonus(request.user, amount)
         return Response(result, status=200)
 
+    # 🟩 Add after topup_with_bonus()
+    @action(detail=False, methods=["post"])
+    def add_credits(self, request):
+        """
+        Add fiat-purchased credits to wallet (after payment confirmation).
+        body: { "amount": "20.00", "provider": "stripe", "reference": "pi_12345" }
+        """
+        from .utils import add_credits
+        amount = Decimal(request.data.get("amount", "0"))
+        provider = request.data.get("provider", "stripe")
+        reference = request.data.get("reference")
+        if amount <= 0:
+            return Response({"detail": "Invalid amount"}, status=400)
+        result = add_credits(request.user, amount, provider, reference)
+        return Response(result, status=200)
+
+    @action(detail=False, methods=["post"])
+    def withdraw_credits(self, request):
+        """
+        Request fiat withdrawal from wallet.
+        body: { "amount": "50.00", "provider": "paypal" }
+        """
+        from .utils import withdraw_credits
+        amount = Decimal(request.data.get("amount", "0"))
+        provider = request.data.get("provider", "paypal")
+        if amount <= 0:
+            return Response({"detail": "Invalid amount"}, status=400)
+        try:
+            result = withdraw_credits(request.user, amount, provider)
+            return Response(result, status=200)
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=400)
+
 
 import stripe
 from rest_framework.views import APIView
